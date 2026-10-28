@@ -1,10 +1,17 @@
 package dev.codecell.app.data
 
+import android.util.Base64
+import android.util.JsonReader
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.io.InputStreamReader
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.net.URI
 import java.net.URL
+import java.net.URLEncoder
 
 class OpencodeException(message: String) : Exception(message)
 
@@ -16,9 +23,22 @@ object OpencodeClient {
 
     private const val CONNECT_TIMEOUT_MS = 8_000
     private const val READ_TIMEOUT_MS = 300_000
+    private const val HEALTH_TIMEOUT_MS = 4_000
 
-    fun health(baseUrl: String): String {
-        val raw = request("GET", url(baseUrl, "/global/health"), null)
+    @Volatile
+    private var authHeader: String? = null
+
+    fun setCredentials(username: String?, password: String?) {
+        authHeader = if (!username.isNullOrBlank() && !password.isNullOrBlank()) {
+            val raw = "$username:$password".toByteArray(Charsets.UTF_8)
+            "Basic " + Base64.encodeToString(raw, Base64.NO_WRAP)
+        } else {
+            null
+        }
+    }
+
+    fun health(baseUrl: String, timeoutMs: Int = HEALTH_TIMEOUT_MS): String {
+        val raw = request("GET", url(baseUrl, "/global/health"), null, timeoutMs)
         val version = runCatching { JSONObject(raw).optString("version") }.getOrDefault("")
         return if (version.isBlank()) "Connected" else "Connected - v$version"
     }
@@ -40,8 +60,11 @@ object OpencodeClient {
             val id = item.optString("id")
             if (id.isBlank()) continue
             val title = item.optString("title").takeIf { it.isNotBlank() } ?: "New chat"
-            val updated = item.optJSONObject("time")?.optLong("updated") ?: 0L
-            result += SessionInfo(id, title, updated)
+            val time = item.optJSONObject("time")
+            val updated = time?.optLong("updated") ?: 0L
+            val archived = (time?.optLong("archived") ?: 0L) > 0L
+            val pinned = item.optJSONObject("metadata")?.optBoolean("pinned") ?: false
+            result += SessionInfo(id, title, updated, pinned, archived)
         }
         return result
     }
@@ -54,8 +77,12 @@ object OpencodeClient {
             val item = array.optJSONObject(i) ?: continue
             val role = item.optJSONObject("info")?.optString("role")
                 ?.takeIf { it == "user" || it == "assistant" } ?: continue
+            val parts = parseParts(item.optJSONArray("parts"))
             val text = joinText(item.optJSONArray("parts"))
-            if (text.isNotBlank()) result += SessionMessage(role, text)
+            val id = item.optJSONObject("info")?.optString("id").orEmpty()
+            if (parts.isNotEmpty() || text.isNotBlank()) {
+                result += SessionMessage(role, text, id, parts)
+            }
         }
         return result
     }
@@ -81,9 +108,11 @@ object OpencodeClient {
         text: String,
         providerID: String?,
         modelID: String?,
+        variant: String? = null,
         agent: String?,
         system: String?,
-    ): String {
+        attachments: List<Attachment> = emptyList(),
+    ): SentMessage {
         val payload = JSONObject().apply {
             if (!providerID.isNullOrBlank() && !modelID.isNullOrBlank()) {
                 put(
@@ -93,19 +122,240 @@ object OpencodeClient {
                         .put("modelID", modelID),
                 )
             }
+            if (!variant.isNullOrBlank()) put("variant", variant)
             if (!agent.isNullOrBlank()) put("agent", agent)
             if (!system.isNullOrBlank()) put("system", system)
-            put(
-                "parts",
-                JSONArray().put(JSONObject().put("type", "text").put("text", text)),
-            )
+            val parts = JSONArray()
+            if (text.isNotBlank()) {
+                parts.put(JSONObject().put("type", "text").put("text", text))
+            }
+            attachments.forEach { attachment ->
+                parts.put(
+                    JSONObject()
+                        .put("type", "file")
+                        .put("mime", attachment.mime)
+                        .put("filename", attachment.name)
+                        .put(
+                            "url",
+                            "data:${attachment.mime};base64," +
+                                Base64.encodeToString(attachment.bytes, Base64.NO_WRAP),
+                        ),
+                )
+            }
+            put("parts", parts)
         }
         val raw = request(
             "POST",
             url(baseUrl, "/session/$sessionId/message"),
             payload.toString(),
         )
-        return extractReply(raw)
+        val info = runCatching { JSONObject(raw).optJSONObject("info") }.getOrNull()
+        val root = runCatching { JSONObject(raw) }.getOrNull()
+        return SentMessage(
+            text = extractReply(raw),
+            assistantID = info?.optString("id")?.takeIf { it.isNotBlank() },
+            userID = info?.optString("parentID")?.takeIf { it.isNotBlank() },
+            parts = parseParts(root?.optJSONArray("parts")),
+        )
+    }
+
+    fun forkSession(baseUrl: String, sessionId: String, messageID: String): String {
+        val body = JSONObject().put("messageID", messageID).toString()
+        val raw = request("POST", url(baseUrl, "/session/$sessionId/fork"), body)
+        val id = JSONObject(raw).optString("id")
+        if (id.isBlank()) throw OpencodeException("Server did not return a forked session id")
+        return id
+    }
+
+    fun revertSession(baseUrl: String, sessionId: String, messageID: String) {
+        val body = JSONObject().put("messageID", messageID).toString()
+        request("POST", url(baseUrl, "/session/$sessionId/revert"), body)
+    }
+
+    fun listProviders(baseUrl: String): ProviderCatalog {
+        val target = url(baseUrl, "/provider")
+        val connection = openConnection(target, 30_000)
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val text = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                throw OpencodeException(errorMessage(code, text))
+            }
+            val all = linkedMapOf<String, ProviderInfo>()
+            val connected = mutableSetOf<String>()
+            JsonReader(InputStreamReader(connection.inputStream, Charsets.UTF_8)).use { reader ->
+                reader.beginObject()
+                while (reader.hasNext()) {
+                    when (reader.nextName()) {
+                        "all" -> {
+                            reader.beginArray()
+                            while (reader.hasNext()) {
+                                reader.beginObject()
+                                var id = ""
+                                var name = ""
+                                while (reader.hasNext()) {
+                                    when (reader.nextName()) {
+                                        "id" -> id = reader.nextString()
+                                        "name" -> name = reader.nextString()
+                                        else -> reader.skipValue()
+                                    }
+                                }
+                                reader.endObject()
+                                if (id.isNotBlank()) {
+                                    all[id] = ProviderInfo(id, name.ifBlank { id })
+                                }
+                            }
+                            reader.endArray()
+                        }
+
+                        "connected" -> {
+                            reader.beginArray()
+                            while (reader.hasNext()) connected += reader.nextString()
+                            reader.endArray()
+                        }
+
+                        else -> reader.skipValue()
+                    }
+                }
+                reader.endObject()
+            }
+            return ProviderCatalog(
+                all = all.values.sortedBy { it.name.lowercase() },
+                connected = connected,
+            )
+        } catch (e: OpencodeException) {
+            throw e
+        } catch (e: IOException) {
+            throw OpencodeException("Could not load providers. Is the server running?")
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    fun listAuthMethods(baseUrl: String): Map<String, List<ProviderAuthMethod>> {
+        val raw = request("GET", url(baseUrl, "/provider/auth"), null, 15_000)
+        val root = JSONObject(raw)
+        val result = linkedMapOf<String, List<ProviderAuthMethod>>()
+        val providers = root.keys()
+        while (providers.hasNext()) {
+            val providerID = providers.next()
+            val array = root.optJSONArray(providerID) ?: continue
+            val methods = mutableListOf<ProviderAuthMethod>()
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val prompts = mutableListOf<ProviderPrompt>()
+                val promptArray = item.optJSONArray("prompts")
+                if (promptArray != null) {
+                    for (p in 0 until promptArray.length()) {
+                        val prompt = promptArray.optJSONObject(p) ?: continue
+                        val key = prompt.optString("key")
+                        if (key.isBlank()) continue
+                        prompts += ProviderPrompt(
+                            key = key,
+                            message = prompt.optString("message").ifBlank { key },
+                            placeholder = prompt.optString("placeholder").takeIf { it.isNotBlank() },
+                            kind = prompt.optString("type").ifBlank { "text" },
+                        )
+                    }
+                }
+                methods += ProviderAuthMethod(
+                    type = item.optString("type"),
+                    label = item.optString("label").ifBlank { item.optString("type") },
+                    prompts = prompts,
+                )
+            }
+            if (methods.isNotEmpty()) result[providerID] = methods
+        }
+        return result
+    }
+
+    fun setApiKey(
+        baseUrl: String,
+        providerID: String,
+        key: String,
+        extra: Map<String, String> = emptyMap(),
+    ) {
+        val body = JSONObject().put("type", "api").put("key", key.trim())
+        extra.forEach { (k, v) -> if (v.isNotBlank()) body.put(k, v.trim()) }
+        request("PUT", url(baseUrl, "/auth/${encode(providerID)}"), body.toString(), 20_000)
+    }
+
+    fun deleteProviderAuth(baseUrl: String, providerID: String) {
+        request("DELETE", url(baseUrl, "/auth/${encode(providerID)}"), null, 20_000)
+    }
+
+    fun disposeInstances(baseUrl: String) {
+        request("POST", url(baseUrl, "/instance/dispose"), null, 20_000)
+    }
+
+    fun deleteSession(baseUrl: String, sessionId: String) {
+        request("DELETE", url(baseUrl, "/session/${encode(sessionId)}"), null, 20_000)
+    }
+
+    fun updateSessionTitle(baseUrl: String, sessionId: String, title: String) {
+        patchSession(baseUrl, sessionId, JSONObject().put("title", title.trim()))
+    }
+
+    fun setSessionPinned(baseUrl: String, sessionId: String, pinned: Boolean) {
+        patchSession(
+            baseUrl,
+            sessionId,
+            JSONObject().put("metadata", JSONObject().put("pinned", pinned)),
+        )
+    }
+
+    fun setSessionArchived(baseUrl: String, sessionId: String, archived: Boolean) {
+        patchSession(
+            baseUrl,
+            sessionId,
+            JSONObject().put(
+                "time",
+                JSONObject().put(
+                    "archived",
+                    if (archived) System.currentTimeMillis() else 0L,
+                ),
+            ),
+        )
+    }
+
+    private fun patchSession(baseUrl: String, sessionId: String, body: JSONObject) {
+        val uri = try {
+            URI(baseUrl.trim())
+        } catch (e: Exception) {
+            throw OpencodeException("Invalid server URL")
+        }
+        val host = uri.host ?: throw OpencodeException("Invalid server URL")
+        val port = if (uri.port > 0) uri.port else 80
+        val path = "/session/${encode(sessionId)}"
+        val payload = body.toString().toByteArray(Charsets.UTF_8)
+        val header = buildString {
+            append("PATCH $path HTTP/1.1\r\n")
+            append("Host: $host:$port\r\n")
+            authHeader?.let { append("Authorization: $it\r\n") }
+            append("Content-Type: application/json; charset=utf-8\r\n")
+            append("Content-Length: ${payload.size}\r\n")
+            append("Connection: close\r\n\r\n")
+        }.toByteArray(Charsets.UTF_8)
+
+        try {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+                socket.soTimeout = 20_000
+                val out = socket.getOutputStream()
+                out.write(header)
+                out.write(payload)
+                out.flush()
+                val status = socket.getInputStream().bufferedReader().readLine().orEmpty()
+                val code = status.split(' ').getOrNull(1)?.toIntOrNull() ?: 0
+                if (code !in 200..299) {
+                    throw OpencodeException("Could not update chat (HTTP $code)")
+                }
+            }
+        } catch (e: OpencodeException) {
+            throw e
+        } catch (e: IOException) {
+            throw OpencodeException("Cannot reach the opencode server. Try restarting it in Settings.")
+        }
     }
 
     fun listModels(baseUrl: String): List<ModelOption> {
@@ -123,10 +373,125 @@ object OpencodeClient {
                 val modelID = keys.next()
                 val model = models.optJSONObject(modelID)
                 val label = model?.optString("name")?.takeIf { it.isNotBlank() } ?: modelID
-                result += ModelOption(providerID, modelID, label)
+                val variants = model?.optJSONObject("variants")
+                    ?.keys()?.asSequence()?.toList().orEmpty()
+                result += ModelOption(providerID, modelID, label, variants = variants)
             }
         }
         return result.sortedBy { it.name.lowercase() }
+    }
+
+    private fun parseParts(parts: JSONArray?): List<ChatPart> {
+        if (parts == null) return emptyList()
+        val result = mutableListOf<ChatPart>()
+        for (i in 0 until parts.length()) {
+            val part = parts.optJSONObject(i) ?: continue
+            val type = part.optString("type")
+            val id = part.optString("id")
+            when (type) {
+                "text" -> {
+                    if (part.optBoolean("ignored")) continue
+                    val text = part.optString("text")
+                    if (text.isNotBlank()) result += ChatPart(id = id, type = type, text = text)
+                }
+
+                "reasoning" -> {
+                    val text = part.optString("text")
+                    if (text.isNotBlank()) result += ChatPart(id = id, type = type, text = text)
+                }
+
+                "tool" -> {
+                    val state = part.optJSONObject("state")
+                    val input = state?.opt("input")
+                    val inputText = when (input) {
+                        is JSONObject -> input.toString(2)
+                        null, JSONObject.NULL -> ""
+                        else -> input.toString()
+                    }
+                    val output = state?.optString("output").orEmpty()
+                    val error = state?.optString("error").orEmpty()
+                    val metadata = state?.optJSONObject("metadata")?.toString(2).orEmpty()
+                    result += ChatPart(
+                        id = id,
+                        type = type,
+                        tool = part.optString("tool"),
+                        status = state?.optString("status").orEmpty(),
+                        title = state?.optString("title").orEmpty(),
+                        input = inputText,
+                        output = output,
+                        error = error,
+                        detail = metadata,
+                    )
+                }
+
+                "patch" -> {
+                    val files = mutableListOf<String>()
+                    val array = part.optJSONArray("files")
+                    if (array != null) {
+                        for (f in 0 until array.length()) {
+                            val file = array.optString(f)
+                            if (file.isNotBlank()) files += file
+                        }
+                    }
+                    result += ChatPart(id = id, type = type, files = files)
+                }
+
+                "step-finish" -> {
+                    val tokens = part.optJSONObject("tokens")
+                    val total = tokens?.optInt("total")?.takeIf { it > 0 }
+                        ?: ((tokens?.optInt("input") ?: 0) + (tokens?.optInt("output") ?: 0))
+                    val cost = part.optDouble("cost", 0.0)
+                    val reason = part.optString("reason")
+                    val bits = mutableListOf<String>()
+                    if (reason.isNotBlank()) bits += reason
+                    if (total > 0) bits += "$total tokens"
+                    if (cost > 0) bits += "$" + String.format(java.util.Locale.US, "%.4f", cost)
+                    result += ChatPart(id = id, type = type, text = bits.joinToString(" · "))
+                }
+
+                "retry" -> {
+                    val attempt = part.optInt("attempt")
+                    val error = part.optJSONObject("error")
+                    val message = error?.optJSONObject("data")?.optString("message")
+                        ?.takeIf { it.isNotBlank() }
+                        ?: error?.optString("message").orEmpty()
+                    result += ChatPart(
+                        id = id,
+                        type = type,
+                        text = message,
+                        detail = if (attempt > 0) "Attempt $attempt" else "",
+                    )
+                }
+
+                "file" -> {
+                    result += ChatPart(
+                        id = id,
+                        type = type,
+                        title = part.optString("filename").ifBlank { "File" },
+                        text = part.optString("mime"),
+                    )
+                }
+
+                "subtask" -> {
+                    result += ChatPart(
+                        id = id,
+                        type = type,
+                        title = part.optString("description"),
+                        text = part.optString("prompt"),
+                        detail = part.optString("agent"),
+                    )
+                }
+
+                "agent" -> {
+                    result += ChatPart(id = id, type = type, title = part.optString("name"))
+                }
+
+                "compaction" -> {
+                    result += ChatPart(id = id, type = type, text = "Context compacted")
+                }
+            }
+        }
+        return result
     }
 
     private fun joinText(parts: JSONArray?): String {
@@ -159,6 +524,11 @@ object OpencodeClient {
                 ?.takeIf { it.isNotBlank() }
                 ?: error.optString("message").takeIf { it.isNotBlank() }
                 ?: error.optString("name")
+            if (message.contains("file part media type", ignoreCase = true)) {
+                throw OpencodeException(
+                    "This model can't read that file type. Remove the attachment or pick another model.",
+                )
+            }
             throw OpencodeException(message.ifBlank { "The model returned an error" })
         }
         return "Done."
@@ -167,18 +537,31 @@ object OpencodeClient {
     private fun url(baseUrl: String, path: String): String =
         baseUrl.trim().trimEnd('/') + path
 
-    private fun request(method: String, target: String, body: String?): String {
+    private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
+
+    private fun openConnection(target: String, readTimeoutMs: Int): HttpURLConnection {
         val connection = try {
             (URL(target).openConnection() as HttpURLConnection)
         } catch (e: Exception) {
             throw OpencodeException("Invalid server URL: $target")
         }
+        connection.connectTimeout = CONNECT_TIMEOUT_MS
+        connection.readTimeout = readTimeoutMs
+        connection.setRequestProperty("Accept", "application/json")
+        authHeader?.let { connection.setRequestProperty("Authorization", it) }
+        return connection
+    }
+
+    private fun request(
+        method: String,
+        target: String,
+        body: String?,
+        readTimeoutMs: Int = READ_TIMEOUT_MS,
+    ): String {
+        val connection = openConnection(target, readTimeoutMs)
 
         try {
             connection.requestMethod = method
-            connection.connectTimeout = CONNECT_TIMEOUT_MS
-            connection.readTimeout = READ_TIMEOUT_MS
-            connection.setRequestProperty("Accept", "application/json")
             if (body != null) {
                 connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -197,7 +580,7 @@ object OpencodeClient {
             throw e
         } catch (e: IOException) {
             throw OpencodeException(
-                "Cannot reach $target. Is `opencode serve` running and reachable from this device?",
+                "Cannot reach the opencode server. Try restarting it in Settings.",
             )
         } finally {
             connection.disconnect()
@@ -205,6 +588,9 @@ object OpencodeClient {
     }
 
     private fun errorMessage(code: Int, raw: String): String {
+        if (raw.contains("file part media type", ignoreCase = true)) {
+            return "This model can't read that file type. Remove the attachment or pick another model."
+        }
         val fallback = if (raw.isBlank()) "HTTP $code" else raw.take(300)
         val parsed = runCatching { JSONObject(raw) }.getOrNull() ?: return fallback
         val error = parsed.optJSONObject("error")

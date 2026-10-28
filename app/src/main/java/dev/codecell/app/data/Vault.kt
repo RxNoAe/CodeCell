@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 /**
  * Everything the app owns lives in a user-picked folder on shared storage.
@@ -53,14 +54,19 @@ class Vault(private val context: Context, private val config: AppConfig) {
             array.put(
                 JSONObject()
                     .put("name", agent.name)
+                    .put("description", agent.description)
                     .put("system", agent.system.orEmpty()),
             )
         }
-        return write("agents.json", array.toString())
+        return runCatching {
+            agentsFile().writeText(array.toString())
+            true
+        }.getOrDefault(false)
     }
 
     fun loadAgents(): List<AgentOption> {
-        val raw = read("agents.json") ?: return emptyList()
+        val raw = runCatching { agentsFile().takeIf { it.isFile }?.readText() }.getOrNull()
+            ?: return emptyList()
         return runCatching {
             val array = JSONArray(raw)
             buildList {
@@ -68,8 +74,10 @@ class Vault(private val context: Context, private val config: AppConfig) {
                     val item = array.optJSONObject(i) ?: continue
                     val name = item.optString("name").trim()
                     val system = item.optString("system")
+                    val description = item.optString("description")
+                        .takeIf { it.isNotBlank() } ?: "Custom agent"
                     if (name.isNotBlank() && system.isNotBlank()) {
-                        add(AgentOption(name = name, description = "Custom agent", system = system))
+                        add(AgentOption(name = name, description = description, system = system))
                     }
                 }
             }
@@ -92,6 +100,8 @@ class Vault(private val context: Context, private val config: AppConfig) {
             .toString()
         write("sessions/$sessionId.json", json)
     }
+
+    private fun agentsFile(): File = File(context.filesDir, "agents.json")
 
     private fun write(relativePath: String, text: String): Boolean {
         val dir = directoryOf(relativePath.substringBeforeLast('/', "")) ?: return false
