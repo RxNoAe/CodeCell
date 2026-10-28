@@ -456,7 +456,7 @@ object OpencodeClient {
         for (i in 0 until array.length()) {
             val answer = array.optJSONArray(i)
             if (answer == null) {
-                result += emptyList()
+                result.add(emptyList())
                 continue
             }
             val labels = mutableListOf<String>()
@@ -464,7 +464,7 @@ object OpencodeClient {
                 val label = answer.optString(j)
                 if (label.isNotBlank()) labels += label
             }
-            result += labels
+            result.add(labels)
         }
         return result
     }
