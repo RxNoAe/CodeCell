@@ -44,6 +44,7 @@ class Vault(private val context: Context, private val config: AppConfig) {
                     ?: return false
             }
             config.treeUri = target.uri.toString()
+            directoryOf("workspace")
             true
         }.getOrDefault(false)
     }

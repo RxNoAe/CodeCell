@@ -942,9 +942,9 @@ fun ProvidersSheet(state: AppState, onDismiss: () -> Unit) {
 
                 catalog != null -> {
                     val cat = catalog!!
-                    val connected = cat.all.filter { it.id in cat.connected }
+                    val connected = cat.all.filter { it.id in state.configuredProviders }
                     val available = cat.all.filter {
-                        it.id !in cat.connected &&
+                        it.id !in state.configuredProviders &&
                             (query.isBlank() ||
                                 it.name.contains(query, ignoreCase = true) ||
                                 it.id.contains(query, ignoreCase = true))
@@ -1019,6 +1019,7 @@ fun ProvidersSheet(state: AppState, onDismiss: () -> Unit) {
                         }
                     }
                     if (result.isSuccess) {
+                        state.markProviderConfigured(provider.id)
                         runCatching { state.reloadAfterProviderChange() }
                         editing = null
                         reload++
@@ -1059,6 +1060,7 @@ fun ProvidersSheet(state: AppState, onDismiss: () -> Unit) {
                                     OpencodeClient.deleteProviderAuth(state.serverUrl, provider.id)
                                 }
                             }
+                            state.unmarkProviderConfigured(provider.id)
                             runCatching { state.reloadAfterProviderChange() }
                             removing = null
                             reload++
@@ -1106,7 +1108,7 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun ProviderRow(
+internal fun ProviderRow(
     provider: ProviderInfo,
     connected: Boolean,
     onClick: () -> Unit,
@@ -1174,7 +1176,7 @@ private fun ProviderRow(
     }
 }
 
-private fun supportsApiKey(
+internal fun supportsApiKey(
     provider: ProviderInfo,
     methods: Map<String, List<ProviderAuthMethod>>,
 ): Boolean {
@@ -1183,7 +1185,7 @@ private fun supportsApiKey(
 }
 
 @Composable
-private fun ProviderKeyDialog(
+internal fun ProviderKeyDialog(
     provider: ProviderInfo,
     method: ProviderAuthMethod?,
     onDismiss: () -> Unit,

@@ -35,6 +35,27 @@ data class ChatPart(
     val error: String = "",
     val files: List<String> = emptyList(),
     val detail: String = "",
+    val questions: List<QuestionInfo> = emptyList(),
+    val answers: List<List<String>> = emptyList(),
+)
+
+data class QuestionOption(
+    val label: String,
+    val description: String,
+)
+
+data class QuestionInfo(
+    val question: String,
+    val header: String,
+    val options: List<QuestionOption> = emptyList(),
+    val multiple: Boolean = false,
+    val custom: Boolean = true,
+)
+
+data class QuestionRequest(
+    val id: String,
+    val sessionID: String,
+    val questions: List<QuestionInfo>,
 )
 
 data class SentMessage(

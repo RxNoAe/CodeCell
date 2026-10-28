@@ -42,9 +42,11 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -68,6 +70,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.PushPin
@@ -77,6 +80,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material.icons.filled.ThumbUp
@@ -100,6 +104,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -136,6 +141,7 @@ import dev.codecell.app.Role
 import dev.codecell.app.ServerPhase
 import dev.codecell.app.data.Attachment
 import dev.codecell.app.data.ChatPart
+import dev.codecell.app.data.QuestionRequest
 import dev.codecell.app.data.SessionInfo
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
@@ -166,6 +172,7 @@ fun CodeCellApp(state: AppState) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val messageListState = rememberLazyListState()
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
 
@@ -234,6 +241,13 @@ fun CodeCellApp(state: AppState) {
             keyboard?.hide()
             state.refreshSessions(scope)
         }
+    }
+
+    if (!state.onboarded) {
+        CodeCellTheme {
+            OnboardingScreen(state = state, scope = scope)
+        }
+        return
     }
 
     CodeCellTheme {
@@ -331,8 +345,24 @@ fun CodeCellApp(state: AppState) {
                             else -> MessageList(
                                 state = state,
                                 scope = scope,
+                                listState = messageListState,
                                 onSearch = { showSearch = true },
                                 onRevert = { revertTarget = it },
+                            )
+                        }
+                        if (messageListState.canScrollForward && state.messages.isNotEmpty()) {
+                            JumpToLatestButton(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(start = 16.dp, bottom = 10.dp),
+                                onClick = {
+                                    val typing = if (state.sending && state.liveMessageId == null) 1 else 0
+                                    scope.launch {
+                                        messageListState.animateScrollToItem(
+                                            state.messages.size + typing
+                                        )
+                                    }
+                                },
                             )
                         }
                     }
@@ -348,6 +378,8 @@ fun CodeCellApp(state: AppState) {
                                 state.send(text, files, scope)
                             }
                         },
+                        sending = state.sending,
+                        onStop = { state.stop(scope) },
                         attachments = attachments,
                         onRemoveAttachment = { attachment ->
                             attachments = attachments.filterNot { it.id == attachment.id }
@@ -520,6 +552,16 @@ fun CodeCellApp(state: AppState) {
                 },
             )
         }
+
+        state.pendingQuestions
+            .firstOrNull { it.sessionID == state.sessionId }
+            ?.let { request ->
+                QuestionDialog(
+                    request = request,
+                    onAnswer = { answers -> state.answerQuestion(request, answers, scope) },
+                    onReject = { state.rejectQuestion(request, scope) },
+                )
+            }
 
         if (showSearch) {
             SearchMessagesDialog(
@@ -1046,20 +1088,33 @@ private fun ServerStatus(phase: ServerPhase, status: String, onRetry: () -> Unit
 private fun MessageList(
     state: AppState,
     scope: CoroutineScope,
+    listState: LazyListState,
     onSearch: () -> Unit,
     onRevert: (ChatMessage) -> Unit,
 ) {
-    val listState = rememberLazyListState()
     val showTyping = state.sending && state.liveMessageId == null
-    val itemCount = state.messages.size + if (showTyping) 1 else 0
+    val anchorIndex = state.messages.size + if (showTyping) 1 else 0
+    val atBottom by remember(listState) {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            last == null || last.index >= info.totalItemsCount - 1
+        }
+    }
 
+    LaunchedEffect(state.messages.size) {
+        if (state.messages.isNotEmpty() && (atBottom || state.messages.lastOrNull()?.role == Role.User)) {
+            listState.animateScrollToItem(anchorIndex)
+        }
+    }
     LaunchedEffect(
-        state.messages.size,
-        state.sending,
-        state.liveMessageId,
         state.messages.lastOrNull()?.parts?.size,
+        state.liveMessageId,
+        state.sending,
     ) {
-        if (itemCount > 0) listState.animateScrollToItem(itemCount - 1)
+        if (atBottom && anchorIndex > 0) {
+            listState.scrollToItem(anchorIndex)
+        }
     }
 
     LazyColumn(
@@ -1079,6 +1134,31 @@ private fun MessageList(
         if (showTyping) {
             item(key = "typing") { TypingRow() }
         }
+        item(key = "bottom-anchor") { Spacer(Modifier.height(1.dp)) }
+    }
+}
+
+@Composable
+private fun JumpToLatestButton(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .shadow(14.dp, CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
+            .clip(CircleShape)
+            .background(Cs.SheetTop)
+            .border(1.dp, Cs.Line, CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.KeyboardArrowDown,
+            contentDescription = "Jump to latest",
+            tint = Cs.Muted,
+            modifier = Modifier.size(22.dp),
+        )
     }
 }
 
@@ -1100,7 +1180,7 @@ private fun MessageRow(
         Box(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Text(
-                    text = message.text,
+                    text = message.userTextWithFiles(),
                     color = Cs.Text,
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier
@@ -1120,7 +1200,7 @@ private fun MessageRow(
                 canModify = canModify,
                 onDismiss = { menu = false },
                 onSearch = onSearch,
-                onCopy = { clipboard.setText(AnnotatedString(message.text)) },
+                onCopy = { clipboard.setText(AnnotatedString(message.userTextWithFiles())) },
                 onFork = onFork,
                 onRevert = onRevert,
             )
@@ -1172,9 +1252,13 @@ private fun ChatMessage.fullText(): String {
     return parts.joinToString("\n\n") { part ->
         when (part.type) {
             "text", "reasoning", "step-finish", "retry", "compaction" -> part.text
-            "tool" -> listOf(part.tool, part.title, part.input, part.output, part.error)
-                .filter { it.isNotBlank() }
-                .joinToString("\n")
+            "tool" -> if (part.tool == "question") {
+                part.questions.joinToString("\n") { it.question }
+            } else {
+                listOf(part.tool, part.title, part.input, part.output, part.error)
+                    .filter { it.isNotBlank() }
+                    .joinToString("\n")
+            }
 
             "patch" -> part.files.joinToString("\n")
             "file" -> listOf(part.title, part.text).filter { it.isNotBlank() }.joinToString("\n")
@@ -1184,6 +1268,20 @@ private fun ChatMessage.fullText(): String {
 
             "agent" -> part.title
             else -> ""
+        }
+    }
+}
+
+private fun ChatMessage.userTextWithFiles(): String {
+    val files = parts.filter { it.type == "file" }.mapNotNull {
+        it.title.takeIf(String::isNotBlank)
+    }
+    return buildString {
+        append(text)
+        files.forEach { name ->
+            if (isNotEmpty()) append("\n\n")
+            append("Attached: ")
+            append(name)
         }
     }
 }
@@ -1288,6 +1386,162 @@ private fun MessageAction(
             )
         },
         onClick = onClick,
+    )
+}
+
+@Composable
+private fun QuestionDialog(
+    request: QuestionRequest,
+    onAnswer: (List<List<String>>) -> Unit,
+    onReject: () -> Unit,
+) {
+    var selections by remember(request.id) {
+        mutableStateOf(List(request.questions.size) { emptySet<String>() })
+    }
+    var customAnswers by remember(request.id) {
+        mutableStateOf(List(request.questions.size) { "" })
+    }
+    val answers = request.questions.mapIndexed { index, question ->
+        buildList {
+            addAll(selections.getOrNull(index).orEmpty())
+            customAnswers.getOrNull(index)?.trim()?.takeIf { it.isNotBlank() }?.let(::add)
+        }
+    }
+    val ready = answers.all { it.isNotEmpty() }
+
+    AlertDialog(
+        onDismissRequest = {},
+        shape = RoundedCornerShape(24.dp),
+        containerColor = Cs.SheetTop,
+        titleContentColor = Cs.Text,
+        textContentColor = Cs.Muted,
+        title = {
+            Text(
+                text = if (request.questions.size == 1) "Question" else "Questions",
+                style = MaterialTheme.typography.titleLarge,
+            )
+        },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                request.questions.forEachIndexed { index, question ->
+                    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        if (question.header.isNotBlank()) {
+                            Text(
+                                text = question.header.uppercase(),
+                                color = Cs.Dim,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                        Text(
+                            text = question.question,
+                            color = Cs.Text,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        question.options.forEach { option ->
+                            val picked = option.label in selections.getOrNull(index).orEmpty()
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(
+                                        if (picked) Cs.Input else Color.Transparent,
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (picked) Cs.Line else Cs.LineSoft,
+                                        RoundedCornerShape(14.dp),
+                                    )
+                                    .clickable {
+                                        val current = selections.getOrNull(index).orEmpty()
+                                        val updated = when {
+                                            question.multiple -> if (picked) {
+                                                current - option.label
+                                            } else {
+                                                current + option.label
+                                            }
+
+                                            else -> setOf(option.label)
+                                        }
+                                        selections = selections.toMutableList().also {
+                                            it[index] = updated
+                                        }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = if (picked) {
+                                        Icons.Filled.CheckCircle
+                                    } else {
+                                        Icons.Filled.Add
+                                    },
+                                    contentDescription = null,
+                                    tint = if (picked) Cs.Text else Cs.Dim,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(9.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = option.label,
+                                        color = Cs.Text,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    if (option.description.isNotBlank()) {
+                                        Text(
+                                            text = option.description,
+                                            color = Cs.Muted,
+                                            style = MaterialTheme.typography.labelSmall,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (question.custom) {
+                            OutlinedTextField(
+                                value = customAnswers.getOrNull(index).orEmpty(),
+                                onValueChange = { value ->
+                                    customAnswers = customAnswers.toMutableList().also {
+                                        it[index] = value
+                                    }
+                                },
+                                label = { Text("Type your own answer") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Cs.Text,
+                                    unfocusedTextColor = Cs.Text,
+                                    focusedContainerColor = Cs.Input,
+                                    unfocusedContainerColor = Cs.Input,
+                                    focusedBorderColor = Cs.Line,
+                                    unfocusedBorderColor = Cs.Line,
+                                    focusedLabelColor = Cs.Muted,
+                                    unfocusedLabelColor = Cs.Muted,
+                                    cursorColor = Cs.Text,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onAnswer(answers) },
+                enabled = ready,
+            ) {
+                Text("Send", color = if (ready) Cs.Text else Cs.Dim)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onReject) {
+                Text("Skip", color = Cs.Muted)
+            }
+        },
     )
 }
 
@@ -1451,7 +1705,11 @@ private fun MessageParts(parts: List<ChatPart>, isError: Boolean) {
                 )
 
                 "reasoning" -> ReasoningCard(part.text)
-                "tool" -> ToolCard(part)
+                "tool" -> if (part.tool == "question") {
+                    QuestionToolCard(part)
+                } else {
+                    ToolCard(part)
+                }
                 "patch" -> PatchCard(part.files)
                 "step-finish" -> if (part.text.isNotBlank()) StepFinishRow(part.text)
                 "retry" -> NoticeCard(
@@ -1589,6 +1847,128 @@ private fun ToolCard(part: ChatPart) {
             ExpandableCode(part.detail, Cs.Dim, maxLines = 6)
         }
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun QuestionToolCard(part: ChatPart) {
+    val accent = Cs.Warn
+    val shape = RoundedCornerShape(16.dp)
+    val waiting = part.status == "running" || part.status == "pending"
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(accent.copy(alpha = 0.06f))
+            .border(1.dp, accent.copy(alpha = 0.32f), shape)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Filled.SmartToy,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(15.dp),
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                text = "QUESTION",
+                color = accent,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = when {
+                    waiting -> "Waiting"
+                    part.answers.isNotEmpty() -> "Answered"
+                    else -> "Asked"
+                },
+                color = if (waiting) accent else Cs.Dim,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        part.questions.forEachIndexed { index, question ->
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                if (question.header.isNotBlank()) {
+                    Text(
+                        text = question.header.uppercase(),
+                        color = Cs.Dim,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+                Text(
+                    text = question.question,
+                    color = Cs.Body,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                val chosen = part.answers.getOrNull(index).orEmpty()
+                question.options.forEach { option ->
+                    val picked = option.label in chosen
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (picked) accent.copy(alpha = 0.12f) else Color.Transparent)
+                            .border(
+                                1.dp,
+                                if (picked) accent.copy(alpha = 0.45f) else Cs.LineSoft,
+                                RoundedCornerShape(12.dp),
+                            )
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = if (picked) Icons.Filled.CheckCircle else Icons.Filled.Add,
+                            contentDescription = null,
+                            tint = if (picked) accent else Cs.Dim,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = option.label,
+                                color = Cs.Text,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            if (option.description.isNotBlank()) {
+                                Text(
+                                    text = option.description,
+                                    color = Cs.Dim,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        }
+                    }
+                }
+                val extra = chosen.filterNot { label ->
+                    question.options.any { it.label == label }
+                }
+                extra.forEach { answer ->
+                    Text(
+                        text = "Your answer: $answer",
+                        color = Cs.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+        if (waiting) {
+            Text(
+                text = "Answer the question to continue.",
+                color = Cs.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        } else if (part.output.isNotBlank()) {
+            Text(
+                text = part.output,
+                color = Cs.Dim,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -1998,6 +2378,8 @@ private fun Composer(
     value: String,
     onValueChange: (String) -> Unit,
     onSend: () -> Unit,
+    sending: Boolean,
+    onStop: () -> Unit,
     attachments: List<Attachment>,
     onRemoveAttachment: (Attachment) -> Unit,
     onAttach: () -> Unit,
@@ -2005,7 +2387,8 @@ private fun Composer(
     onModels: () -> Unit,
 ) {
     val canSend = value.isNotBlank() || attachments.isNotEmpty()
-    val sendScale by animateFloatAsState(if (canSend) 1f else 0.9f, label = "sendScale")
+    val active = canSend || sending
+    val sendScale by animateFloatAsState(if (active) 1f else 0.9f, label = "sendScale")
     val shape = RoundedCornerShape(30.dp)
 
     Column(
@@ -2059,7 +2442,7 @@ private fun Composer(
                     imeAction = ImeAction.Send,
                     capitalization = KeyboardCapitalization.Sentences,
                 ),
-                keyboardActions = KeyboardActions(onSend = { onSend() }),
+                keyboardActions = KeyboardActions(onSend = { if (!sending) onSend() }),
                 decorationBox = { innerTextField ->
                     Box {
                         if (value.isEmpty()) {
@@ -2083,28 +2466,40 @@ private fun Composer(
                         scaleY = sendScale
                     }
                     .shadow(
-                        elevation = if (canSend) 14.dp else 0.dp,
+                        elevation = if (active) 14.dp else 0.dp,
                         shape = CircleShape,
                         ambientColor = Color.White.copy(alpha = 0.2f),
                         spotColor = Color.White.copy(alpha = 0.2f),
                     )
                     .clip(CircleShape)
                     .background(
-                        brush = if (canSend) {
-                            Cs.ButtonGradient
-                        } else {
-                            Brush.verticalGradient(listOf(Color(0xFF2A2A31), Color(0xFF232329)))
+                        brush = when {
+                            sending -> Brush.verticalGradient(
+                                listOf(Color(0xFF3A3A44), Color(0xFF2A2A31)),
+                            )
+                            canSend -> Cs.ButtonGradient
+                            else -> Brush.verticalGradient(
+                                listOf(Color(0xFF2A2A31), Color(0xFF232329)),
+                            )
                         },
                     )
-                    .border(1.dp, if (canSend) Color.Transparent else Cs.Line, CircleShape),
+                    .border(1.dp, if (active) Color.Transparent else Cs.Line, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                IconButton(onClick = onSend, enabled = canSend, modifier = Modifier.size(38.dp)) {
+                IconButton(
+                    onClick = { if (sending) onStop() else onSend() },
+                    enabled = active,
+                    modifier = Modifier.size(38.dp),
+                ) {
                     Icon(
-                        Icons.Filled.ArrowUpward,
-                        contentDescription = "Send",
-                        tint = if (canSend) Cs.Bg else Cs.Dim,
-                        modifier = Modifier.size(20.dp),
+                        imageVector = if (sending) Icons.Filled.Stop else Icons.Filled.ArrowUpward,
+                        contentDescription = if (sending) "Stop" else "Send",
+                        tint = when {
+                            sending -> Cs.Text
+                            canSend -> Cs.Bg
+                            else -> Cs.Dim
+                        },
+                        modifier = Modifier.size(if (sending) 18.dp else 20.dp),
                     )
                 }
             }

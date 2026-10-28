@@ -12,12 +12,14 @@ import dev.codecell.app.data.ChatPart
 import dev.codecell.app.data.LocalServer
 import dev.codecell.app.data.ModelOption
 import dev.codecell.app.data.OpencodeClient
+import dev.codecell.app.data.QuestionRequest
 import dev.codecell.app.data.SessionInfo
 import dev.codecell.app.data.SessionMessage
 import dev.codecell.app.data.Vault
 import dev.codecell.app.service.ServerService
 import java.io.File
 import java.net.URI
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -66,6 +68,16 @@ class AppState(context: Context) {
     var folderLabel by mutableStateOf(vault.label())
     var hasFolder by mutableStateOf(vault.hasFolder())
     var folderPrompted by mutableStateOf(config.folderPrompted)
+    var onboarded by mutableStateOf(config.onboarded)
+        private set
+    var configuredProviders by mutableStateOf(config.configuredProviders)
+        private set
+    var pendingQuestions by mutableStateOf<List<QuestionRequest>>(emptyList())
+        private set
+
+    private var sendJob: Job? = null
+    private var activePollJob: Job? = null
+    private var userStopped = false
 
     var builtinAgents by mutableStateOf(DEFAULT_AGENTS)
     var customAgents by mutableStateOf(vault.loadAgents())
@@ -188,6 +200,22 @@ class AppState(context: Context) {
         folderPrompted = true
     }
 
+    fun completeOnboarding() {
+        config.onboarded = true
+        onboarded = true
+    }
+
+    fun markProviderConfigured(providerID: String) {
+        if (providerID.isBlank()) return
+        configuredProviders = configuredProviders + providerID
+        config.configuredProviders = configuredProviders
+    }
+
+    fun unmarkProviderConfigured(providerID: String) {
+        configuredProviders = configuredProviders - providerID
+        config.configuredProviders = configuredProviders
+    }
+
     fun selectModel(option: ModelOption?) {
         model = option
         config.model = option
@@ -218,6 +246,7 @@ class AppState(context: Context) {
         sessionTitle = "New chat"
         messages = emptyList()
         liveMessageId = null
+        pendingQuestions = emptyList()
     }
 
     fun refreshAgents(scope: CoroutineScope) {
@@ -269,6 +298,12 @@ class AppState(context: Context) {
                         parts = message.parts,
                     )
                 }
+                pendingQuestions = withContext(Dispatchers.IO) {
+                    runCatching {
+                        OpencodeClient.listQuestions(serverUrl)
+                            .filter { it.sessionID == target.id }
+                    }.getOrDefault(emptyList())
+                }
                 markRunning()
             } catch (e: Exception) {
                 messages = listOf(
@@ -276,6 +311,57 @@ class AppState(context: Context) {
                 )
             } finally {
                 loadingHistory = false
+            }
+        }
+    }
+
+    fun answerQuestion(
+        request: QuestionRequest,
+        answers: List<List<String>>,
+        scope: CoroutineScope,
+    ) {
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    OpencodeClient.replyQuestion(serverUrl, request.id, answers)
+                }
+                pendingQuestions = pendingQuestions.filterNot { it.id == request.id }
+                if (!sending) refreshSessionMessages(scope)
+            } catch (e: Exception) {
+                pendingQuestions = pendingQuestions.filterNot { it.id == request.id }
+                append(Role.Assistant, e.message ?: "Could not send that answer", isError = true)
+            }
+        }
+    }
+
+    fun rejectQuestion(request: QuestionRequest, scope: CoroutineScope) {
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    OpencodeClient.rejectQuestion(serverUrl, request.id)
+                }
+            }
+            pendingQuestions = pendingQuestions.filterNot { it.id == request.id }
+        }
+    }
+
+    private fun refreshSessionMessages(scope: CoroutineScope) {
+        val id = sessionId ?: return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    OpencodeClient.loadMessages(serverUrl, id)
+                }
+            }.onSuccess { loaded ->
+                messages = loaded.map { item ->
+                    ChatMessage(
+                        id = nextId++,
+                        role = if (item.role == "assistant") Role.Assistant else Role.User,
+                        text = item.text,
+                        serverId = item.id.takeIf { it.isNotBlank() },
+                        parts = item.parts,
+                    )
+                }
             }
         }
     }
@@ -289,17 +375,21 @@ class AppState(context: Context) {
             ?.takeIf { it.isNotBlank() }
             ?: attachments.firstOrNull()?.name
             ?: "New chat"
-        val display = content.ifBlank {
-            attachments.joinToString("\n") { "Attached: ${it.name}" }
+        val display = content
+        val userParts = attachments.map {
+            ChatPart(type = "file", title = it.name, text = it.mime)
         }
 
         val baselineAssistantIds = messages
             .filter { it.role == Role.Assistant }
             .mapNotNull { it.serverId }
             .toSet()
-        val userMessage = append(Role.User, display)
+        val userMessage = append(Role.User, display, parts = userParts)
         sending = true
-        scope.launch {
+        userStopped = false
+        var sessionForCleanup: String? = null
+
+        sendJob = scope.launch {
             var pollJob: Job? = null
             try {
                 val activeSession = sessionId ?: withContext(Dispatchers.IO) {
@@ -308,6 +398,7 @@ class AppState(context: Context) {
                     sessionId = it
                     sessionTitle = title
                 }
+                sessionForCleanup = activeSession
 
                 pollJob = scope.launch(Dispatchers.IO) {
                     while (isActive) {
@@ -349,9 +440,20 @@ class AppState(context: Context) {
                                 }
                             }
                         }
+                        val questions = runCatching {
+                            OpencodeClient.listQuestions(serverUrl)
+                        }.getOrNull()
+                        if (questions != null) {
+                            val mine = questions.filter { it.sessionID == activeSession }
+                            withContext(Dispatchers.Main) {
+                                pendingQuestions = pendingQuestions
+                                    .filterNot { it.sessionID == activeSession } + mine
+                            }
+                        }
                         delay(700)
                     }
                 }
+                activePollJob = pollJob
 
                 val sent = withContext(Dispatchers.IO) {
                     OpencodeClient.sendMessage(
@@ -369,6 +471,7 @@ class AppState(context: Context) {
                 markRunning()
                 pollJob?.cancelAndJoin()
                 pollJob = null
+                activePollJob = null
                 val finalLoaded = runCatching {
                     withContext(Dispatchers.IO) {
                         OpencodeClient.loadMessages(serverUrl, activeSession)
@@ -406,27 +509,63 @@ class AppState(context: Context) {
                         parts = finalParts,
                     )
                 }
+                pendingQuestions = pendingQuestions.filterNot { it.sessionID == activeSession }
                 persistSession(activeSession, scope)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 pollJob?.cancel()
                 pollJob = null
-                val message = e.message ?: "Request failed"
-                val live = liveMessageId
-                if (live != null) {
-                    messages = messages.map {
-                        if (it.id == live) it.copy(text = message, isError = true) else it
+                activePollJob = null
+                if (userStopped) {
+                    if (liveMessageId == null) {
+                        append(Role.Assistant, "Stopped.")
                     }
                 } else {
-                    append(Role.Assistant, message, isError = true)
+                    val message = e.message ?: "Request failed"
+                    val live = liveMessageId
+                    if (live != null) {
+                        messages = messages.map {
+                            if (it.id == live) it.copy(text = message, isError = true) else it
+                        }
+                    } else {
+                        append(Role.Assistant, message, isError = true)
+                    }
                 }
             } finally {
                 pollJob?.cancel()
+                activePollJob = null
                 liveMessageId = null
                 sending = false
+                userStopped = false
+                sendJob = null
+                sessionForCleanup?.let { active ->
+                    pendingQuestions = pendingQuestions.filterNot { it.sessionID == active }
+                }
             }
         }
 
         if (isNew) sessionTitle = title
+    }
+
+    fun stop(scope: CoroutineScope) {
+        if (!sending) return
+        val activeSession = sessionId
+        userStopped = true
+        activePollJob?.cancel()
+        activePollJob = null
+        OpencodeClient.cancelActiveRequest()
+        if (activeSession != null) {
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    runCatching { OpencodeClient.abortSession(serverUrl, activeSession) }
+                }
+            }
+        }
+        scope.launch {
+            delay(4_000)
+            if (userStopped && sending) sendJob?.cancel()
+        }
     }
 
     fun deleteSession(target: SessionInfo, scope: CoroutineScope) {

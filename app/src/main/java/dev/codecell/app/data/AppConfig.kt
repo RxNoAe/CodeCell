@@ -67,6 +67,14 @@ class AppConfig(context: Context) {
         get() = prefs.getBoolean(KEY_PROMPTED, false)
         set(value) = prefs.edit().putBoolean(KEY_PROMPTED, value).apply()
 
+    var onboarded: Boolean
+        get() = prefs.getBoolean(KEY_ONBOARDED, false)
+        set(value) = prefs.edit().putBoolean(KEY_ONBOARDED, value).apply()
+
+    var configuredProviders: Set<String>
+        get() = prefs.getStringSet(KEY_PROVIDERS, emptySet()).orEmpty()
+        set(value) = prefs.edit().putStringSet(KEY_PROVIDERS, value).apply()
+
     var agentName: String
         get() = prefs.getString(KEY_AGENT, "build")?.takeIf { it.isNotBlank() } ?: "build"
         set(value) = prefs.edit().putString(KEY_AGENT, value).apply()
@@ -119,6 +127,8 @@ class AppConfig(context: Context) {
         private const val KEY_NAME = "user_name"
         private const val KEY_TREE = "tree_uri"
         private const val KEY_PROMPTED = "folder_prompted"
+        private const val KEY_ONBOARDED = "onboarded"
+        private const val KEY_PROVIDERS = "configured_providers"
         private const val KEY_AGENT = "agent_name"
         private const val KEY_AGENT_SYSTEM = "agent_system"
         private const val KEY_PROVIDER = "provider_id"

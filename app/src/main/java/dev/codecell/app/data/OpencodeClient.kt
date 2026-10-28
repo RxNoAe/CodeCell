@@ -28,6 +28,13 @@ object OpencodeClient {
     @Volatile
     private var authHeader: String? = null
 
+    @Volatile
+    private var activeConnection: HttpURLConnection? = null
+
+    fun cancelActiveRequest() {
+        activeConnection?.disconnect()
+    }
+
     fun setCredentials(username: String?, password: String?) {
         authHeader = if (!username.isNullOrBlank() && !password.isNullOrBlank()) {
             val raw = "$username:$password".toByteArray(Charsets.UTF_8)
@@ -292,6 +299,40 @@ object OpencodeClient {
         request("DELETE", url(baseUrl, "/session/${encode(sessionId)}"), null, 20_000)
     }
 
+    fun abortSession(baseUrl: String, sessionId: String) {
+        request("POST", url(baseUrl, "/session/${encode(sessionId)}/abort"), null, 20_000)
+    }
+
+    fun listQuestions(baseUrl: String): List<QuestionRequest> {
+        val raw = request("GET", url(baseUrl, "/question"), null, 15_000)
+        val array = JSONArray(raw)
+        val result = mutableListOf<QuestionRequest>()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val id = item.optString("id")
+            val sessionID = item.optString("sessionID")
+            if (id.isBlank() || sessionID.isBlank()) continue
+            val questions = parseQuestions(item.optJSONArray("questions"))
+            if (questions.isNotEmpty()) result += QuestionRequest(id, sessionID, questions)
+        }
+        return result
+    }
+
+    fun replyQuestion(
+        baseUrl: String,
+        requestId: String,
+        answers: List<List<String>>,
+    ) {
+        val payload = JSONArray()
+        answers.forEach { answer -> payload.put(JSONArray(answer)) }
+        val body = JSONObject().put("answers", payload).toString()
+        request("POST", url(baseUrl, "/question/${encode(requestId)}/reply"), body, 20_000)
+    }
+
+    fun rejectQuestion(baseUrl: String, requestId: String) {
+        request("POST", url(baseUrl, "/question/${encode(requestId)}/reject"), null, 20_000)
+    }
+
     fun updateSessionTitle(baseUrl: String, sessionId: String, title: String) {
         patchSession(baseUrl, sessionId, JSONObject().put("title", title.trim()))
     }
@@ -381,6 +422,53 @@ object OpencodeClient {
         return result.sortedBy { it.name.lowercase() }
     }
 
+    private fun parseQuestions(array: JSONArray?): List<QuestionInfo> {
+        if (array == null) return emptyList()
+        val result = mutableListOf<QuestionInfo>()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val question = item.optString("question")
+            if (question.isBlank()) continue
+            val options = mutableListOf<QuestionOption>()
+            val optionArray = item.optJSONArray("options")
+            if (optionArray != null) {
+                for (o in 0 until optionArray.length()) {
+                    val option = optionArray.optJSONObject(o) ?: continue
+                    val label = option.optString("label")
+                    if (label.isBlank()) continue
+                    options += QuestionOption(label, option.optString("description"))
+                }
+            }
+            result += QuestionInfo(
+                question = question,
+                header = item.optString("header").ifBlank { "Question" },
+                options = options,
+                multiple = item.optBoolean("multiple", false),
+                custom = item.optBoolean("custom", true),
+            )
+        }
+        return result
+    }
+
+    private fun parseAnswers(array: JSONArray?): List<List<String>> {
+        if (array == null) return emptyList()
+        val result = mutableListOf<List<String>>()
+        for (i in 0 until array.length()) {
+            val answer = array.optJSONArray(i)
+            if (answer == null) {
+                result += emptyList()
+                continue
+            }
+            val labels = mutableListOf<String>()
+            for (j in 0 until answer.length()) {
+                val label = answer.optString(j)
+                if (label.isNotBlank()) labels += label
+            }
+            result += labels
+        }
+        return result
+    }
+
     private fun parseParts(parts: JSONArray?): List<ChatPart> {
         if (parts == null) return emptyList()
         val result = mutableListOf<ChatPart>()
@@ -401,8 +489,14 @@ object OpencodeClient {
                 }
 
                 "tool" -> {
+                    val toolName = part.optString("tool")
                     val state = part.optJSONObject("state")
                     val input = state?.opt("input")
+                    val inputObject = when (input) {
+                        is JSONObject -> input
+                        is String -> runCatching { JSONObject(input) }.getOrNull()
+                        else -> null
+                    }
                     val inputText = when (input) {
                         is JSONObject -> input.toString(2)
                         null, JSONObject.NULL -> ""
@@ -410,17 +504,28 @@ object OpencodeClient {
                     }
                     val output = state?.optString("output").orEmpty()
                     val error = state?.optString("error").orEmpty()
-                    val metadata = state?.optJSONObject("metadata")?.toString(2).orEmpty()
+                    val metadataObject = state?.optJSONObject("metadata")
+                    val metadata = metadataObject?.toString(2).orEmpty()
                     result += ChatPart(
                         id = id,
                         type = type,
-                        tool = part.optString("tool"),
+                        tool = toolName,
                         status = state?.optString("status").orEmpty(),
                         title = state?.optString("title").orEmpty(),
                         input = inputText,
                         output = output,
                         error = error,
                         detail = metadata,
+                        questions = if (toolName == "question") {
+                            parseQuestions(inputObject?.optJSONArray("questions"))
+                        } else {
+                            emptyList()
+                        },
+                        answers = if (toolName == "question") {
+                            parseAnswers(metadataObject?.optJSONArray("answers"))
+                        } else {
+                            emptyList()
+                        },
                     )
                 }
 
@@ -559,6 +664,7 @@ object OpencodeClient {
         readTimeoutMs: Int = READ_TIMEOUT_MS,
     ): String {
         val connection = openConnection(target, readTimeoutMs)
+        activeConnection = connection
 
         try {
             connection.requestMethod = method
@@ -583,6 +689,7 @@ object OpencodeClient {
                 "Cannot reach the opencode server. Try restarting it in Settings.",
             )
         } finally {
+            if (activeConnection === connection) activeConnection = null
             connection.disconnect()
         }
     }
