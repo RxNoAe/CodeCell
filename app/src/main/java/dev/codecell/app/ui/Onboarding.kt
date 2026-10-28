@@ -1,5 +1,13 @@
 package dev.codecell.app.ui
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -63,6 +71,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import dev.codecell.app.AppState
 import dev.codecell.app.R
 import dev.codecell.app.ServerPhase
@@ -84,6 +93,7 @@ fun OnboardingScreen(state: AppState, scope: CoroutineScope) {
     var linuxBusy by remember { mutableStateOf(false) }
     var linuxProgress by remember { mutableStateOf(0f) }
     var linuxError by remember { mutableStateOf<String?>(null) }
+    var fileAccess by remember { mutableStateOf(hasFileAccess(context)) }
 
     Surface(Modifier.fillMaxSize(), color = Cs.Bg) {
         Box(
@@ -103,7 +113,12 @@ fun OnboardingScreen(state: AppState, scope: CoroutineScope) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when (page) {
                         0 -> ProviderSetup(state = state, scope = scope)
-                        1 -> FolderSetup(state = state, scope = scope)
+                        1 -> FolderSetup(
+                            state = state,
+                            scope = scope,
+                            hasAccess = fileAccess,
+                            onAccessChanged = { fileAccess = it },
+                        )
                         else -> LinuxSetup(
                             installed = linuxInstalled,
                             busy = linuxBusy,
@@ -170,7 +185,7 @@ fun OnboardingScreen(state: AppState, scope: CoroutineScope) {
 
                         1 -> OnboardingAction(
                             label = "Next",
-                            enabled = state.hasFolder,
+                            enabled = state.hasFolder && fileAccess,
                             onClick = { page = 2 },
                         )
 
@@ -510,8 +525,40 @@ private fun ServerSetupStatus(state: AppState, scope: CoroutineScope) {
 }
 
 @Composable
-private fun FolderSetup(state: AppState, scope: CoroutineScope) {
+private fun FolderSetup(
+    state: AppState,
+    scope: CoroutineScope,
+    hasAccess: Boolean,
+    onAccessChanged: (Boolean) -> Unit,
+) {
     val context = LocalContext.current
+    val storagePermissions = remember {
+        arrayOf(
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        )
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        val granted = hasFileAccess(context)
+        onAccessChanged(granted)
+        if (!granted) {
+            Toast.makeText(context, "File access is needed for your workspace", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val settingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        onAccessChanged(hasFileAccess(context))
+    }
+    fun requestAccess() {
+        permissionLauncher.launch(storagePermissions)
+    }
+    LaunchedEffect(Unit) {
+        if (!hasAccess) requestAccess()
+    }
+
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -519,11 +566,13 @@ private fun FolderSetup(state: AppState, scope: CoroutineScope) {
             state.attachFolder(uri, scope)
             if (!state.hasFolder) {
                 Toast.makeText(context, "Choose a folder on this device", Toast.LENGTH_SHORT).show()
+            } else if (!hasFileAccess(context)) {
+                requestAccess()
             }
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Text("Set up CodeCell", style = MaterialTheme.typography.headlineMedium, color = Cs.Text)
         Spacer(Modifier.height(6.dp))
         Text(
@@ -606,6 +655,93 @@ private fun FolderSetup(state: AppState, scope: CoroutineScope) {
             }
         }
 
+        Spacer(Modifier.height(12.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Cs.Input.copy(alpha = 0.5f))
+                .border(
+                    1.dp,
+                    if (hasAccess) Cs.Line else Cs.LineSoft,
+                    RoundedCornerShape(20.dp),
+                )
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Cs.SheetTop),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Folder,
+                        contentDescription = null,
+                        tint = if (hasAccess) Cs.Success else Cs.Muted,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "File access",
+                        color = Cs.Text,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        text = if (hasAccess) {
+                            "Allowed for your workspace"
+                        } else {
+                            "Allow CodeCell to read and write workspace files"
+                        },
+                        color = Cs.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (hasAccess) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = Cs.Success,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            if (!hasAccess) {
+                OutlinedButton(
+                    onClick = { requestAccess() },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Allow file access")
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    OutlinedButton(
+                        onClick = {
+                            val intent = Intent(
+                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:${context.packageName}"),
+                            )
+                            runCatching { settingsLauncher.launch(intent) }.onFailure {
+                                runCatching {
+                                    settingsLauncher.launch(
+                                        Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
+                                    )
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Open all files settings")
+                    }
+                }
+            }
+        }
+
         Spacer(Modifier.height(18.dp))
         Text(
             text = "Your API keys stay in the opencode server on this device. " +
@@ -614,6 +750,17 @@ private fun FolderSetup(state: AppState, scope: CoroutineScope) {
             color = Cs.Dim,
         )
     }
+}
+
+private fun hasFileAccess(context: Context): Boolean {
+    val runtimeGranted =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+    val allFilesGranted = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+        Environment.isExternalStorageManager()
+    return runtimeGranted || allFilesGranted
 }
 
 @Composable
