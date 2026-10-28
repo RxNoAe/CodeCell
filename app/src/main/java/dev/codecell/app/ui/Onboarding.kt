@@ -1,11 +1,5 @@
 package dev.codecell.app.ui
 
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,6 +7,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +35,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -73,6 +70,7 @@ import dev.codecell.app.data.OpencodeClient
 import dev.codecell.app.data.ProviderAuthMethod
 import dev.codecell.app.data.ProviderCatalog
 import dev.codecell.app.data.ProviderInfo
+import dev.codecell.app.data.TermuxEnvironment
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -81,6 +79,11 @@ import kotlinx.coroutines.withContext
 @Composable
 fun OnboardingScreen(state: AppState, scope: CoroutineScope) {
     var page by rememberSaveable { mutableStateOf(0) }
+    val context = LocalContext.current
+    var linuxInstalled by remember { mutableStateOf(TermuxEnvironment.isInstalled(context)) }
+    var linuxBusy by remember { mutableStateOf(false) }
+    var linuxProgress by remember { mutableStateOf(0f) }
+    var linuxError by remember { mutableStateOf<String?>(null) }
 
     Surface(Modifier.fillMaxSize(), color = Cs.Bg) {
         Box(
@@ -98,77 +101,111 @@ fun OnboardingScreen(state: AppState, scope: CoroutineScope) {
                 OnboardingHeader(page)
                 Spacer(Modifier.height(22.dp))
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    if (page == 0) {
-                        ProviderSetup(state = state, scope = scope)
-                    } else {
-                        FolderSetup(state = state, scope = scope)
+                    when (page) {
+                        0 -> ProviderSetup(state = state, scope = scope)
+                        1 -> FolderSetup(state = state, scope = scope)
+                        else -> LinuxSetup(
+                            installed = linuxInstalled,
+                            busy = linuxBusy,
+                            progress = linuxProgress,
+                            error = linuxError,
+                            onInstall = {
+                                if (!linuxBusy && !linuxInstalled) {
+                                    linuxBusy = true
+                                    linuxError = null
+                                    linuxProgress = 0f
+                                    scope.launch {
+                                        val result = withContext(Dispatchers.IO) {
+                                            runCatching {
+                                                TermuxEnvironment.install(context) { progress ->
+                                                    linuxProgress = progress
+                                                }
+                                            }
+                                        }
+                                        result.onSuccess {
+                                            linuxInstalled = true
+                                            state.restartServer(scope)
+                                        }.onFailure {
+                                            linuxError = it.message
+                                                ?: "Could not install the Linux files"
+                                        }
+                                        linuxBusy = false
+                                    }
+                                }
+                            },
+                        )
                     }
                 }
                 Spacer(Modifier.height(14.dp))
-                if (page == 0) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "STEP 1 OF 2",
-                            color = Cs.Dim,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Button(
-                            onClick = { page = 1 },
-                            enabled = state.configuredProviders.isNotEmpty(),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Cs.Text,
-                                contentColor = Cs.Bg,
-                                disabledContainerColor = Cs.Input,
-                                disabledContentColor = Cs.Dim,
-                            ),
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (page > 0) {
+                        val canGoBack = !(page == 2 && linuxBusy)
+                        TextButton(
+                            onClick = { page -= 1 },
+                            enabled = canGoBack,
                         ) {
-                            Text("Next", style = MaterialTheme.typography.titleSmall)
-                            Spacer(Modifier.width(6.dp))
-                            Icon(
-                                Icons.Filled.ArrowForward,
-                                contentDescription = null,
-                                modifier = Modifier.size(17.dp),
-                            )
-                        }
-                    }
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { page = 0 }) {
                             Icon(
                                 Icons.Filled.ArrowBack,
                                 contentDescription = null,
-                                tint = Cs.Muted,
+                                tint = if (canGoBack) Cs.Muted else Cs.Dim,
                                 modifier = Modifier.size(16.dp),
                             )
                             Spacer(Modifier.width(5.dp))
-                            Text("Back", color = Cs.Muted)
+                            Text("Back", color = if (canGoBack) Cs.Muted else Cs.Dim)
                         }
-                        Spacer(Modifier.weight(1f))
-                        Button(
-                            onClick = { state.completeOnboarding() },
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(
+                        text = "STEP ${page + 1} OF 3",
+                        color = Cs.Dim,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    when (page) {
+                        0 -> OnboardingAction(
+                            label = "Next",
+                            enabled = state.configuredProviders.isNotEmpty(),
+                            onClick = { page = 1 },
+                        )
+
+                        1 -> OnboardingAction(
+                            label = "Next",
                             enabled = state.hasFolder,
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Cs.Text,
-                                contentColor = Cs.Bg,
-                                disabledContainerColor = Cs.Input,
-                                disabledContentColor = Cs.Dim,
-                            ),
-                        ) {
-                            Text("Start chatting", style = MaterialTheme.typography.titleSmall)
-                            Spacer(Modifier.width(6.dp))
-                            Icon(
-                                Icons.Filled.ArrowForward,
-                                contentDescription = null,
-                                modifier = Modifier.size(17.dp),
-                            )
-                        }
+                            onClick = { page = 2 },
+                        )
+
+                        else -> OnboardingAction(
+                            label = "Start chatting",
+                            enabled = linuxInstalled,
+                            onClick = { state.completeOnboarding() },
+                        )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun OnboardingAction(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Cs.Text,
+            contentColor = Cs.Bg,
+            disabledContainerColor = Cs.Input,
+            disabledContentColor = Cs.Dim,
+        ),
+    ) {
+        Text(label, style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.width(6.dp))
+        Icon(
+            Icons.Filled.ArrowForward,
+            contentDescription = null,
+            modifier = Modifier.size(17.dp),
+        )
     }
 }
 
@@ -193,13 +230,17 @@ private fun OnboardingHeader(page: Int) {
         Column(Modifier.weight(1f)) {
             Text("CodeCell", style = MaterialTheme.typography.titleLarge, color = Cs.Text)
             Text(
-                text = if (page == 0) "Connect your AI provider" else "Choose your workspace",
+                text = when (page) {
+                    0 -> "Connect your AI provider"
+                    1 -> "Choose your workspace"
+                    else -> "Install Linux tools"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = Cs.Muted,
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(2) { index ->
+            repeat(3) { index ->
                 Box(
                     Modifier
                         .size(width = if (index == page) 20.dp else 7.dp, height = 7.dp)
@@ -471,7 +512,6 @@ private fun ServerSetupStatus(state: AppState, scope: CoroutineScope) {
 @Composable
 private fun FolderSetup(state: AppState, scope: CoroutineScope) {
     val context = LocalContext.current
-    val allFiles = hasAllFilesAccess(context)
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -479,8 +519,6 @@ private fun FolderSetup(state: AppState, scope: CoroutineScope) {
             state.attachFolder(uri, scope)
             if (!state.hasFolder) {
                 Toast.makeText(context, "Choose a folder on this device", Toast.LENGTH_SHORT).show()
-            } else if (!hasAllFilesAccess(context)) {
-                openAllFilesSettings(context)
             }
         }
     }
@@ -566,15 +604,6 @@ private fun FolderSetup(state: AppState, scope: CoroutineScope) {
                 Spacer(Modifier.width(6.dp))
                 Text(if (state.hasFolder) "Change folder" else "Choose folder")
             }
-            if (state.hasFolder && !allFiles) {
-                OutlinedButton(
-                    onClick = { openAllFilesSettings(context) },
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Allow workspace file access")
-                }
-            }
         }
 
         Spacer(Modifier.height(18.dp))
@@ -587,18 +616,139 @@ private fun FolderSetup(state: AppState, scope: CoroutineScope) {
     }
 }
 
-internal fun hasAllFilesAccess(context: Context): Boolean =
-    Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+@Composable
+private fun LinuxSetup(
+    installed: Boolean,
+    busy: Boolean,
+    progress: Float,
+    error: String?,
+    onInstall: () -> Unit,
+) {
+    val stage = when {
+        progress < 0.7f -> "Downloading Linux files"
+        progress < 0.98f -> "Extracting Linux files"
+        else -> "Finishing setup"
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Text("Install Linux tools", style = MaterialTheme.typography.headlineMedium, color = Cs.Text)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "CodeCell needs a one-time 32 MB download so chat commands can use " +
+                "bash, pkg/apt, and Linux tools. This step can't be skipped.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Cs.Muted,
+        )
+        Spacer(Modifier.height(20.dp))
 
-internal fun openAllFilesSettings(context: Context) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-    val appSettings = Intent(
-        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-        Uri.parse("package:${context.packageName}"),
-    )
-    runCatching { context.startActivity(appSettings) }.onFailure {
-        runCatching {
-            context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Cs.Input.copy(alpha = 0.5f))
+                .border(
+                    1.dp,
+                    if (installed) Cs.Line else Cs.LineSoft,
+                    RoundedCornerShape(20.dp),
+                )
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Cs.SheetTop),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (installed) Icons.Filled.Check else Icons.Filled.Build,
+                        contentDescription = null,
+                        tint = if (installed) Cs.Success else Cs.Muted,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = if (installed) "Linux environment ready" else "Required environment",
+                        color = Cs.Text,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        text = when {
+                            installed -> "bash and pkg/apt are available"
+                            busy -> stage
+                            else -> "Not installed"
+                        },
+                        color = Cs.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (installed) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = Cs.Success,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+
+            if (busy) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(15.dp),
+                        strokeWidth = 1.5.dp,
+                        color = Cs.Muted,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "$stage · ${(progress * 100).toInt()}%",
+                        color = Cs.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            error?.let {
+                Text(
+                    text = it,
+                    color = Cs.Error,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            if (!installed) {
+                OutlinedButton(
+                    onClick = onInstall,
+                    enabled = !busy,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(15.dp),
+                            strokeWidth = 1.5.dp,
+                            color = Cs.Muted,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Installing...")
+                    } else {
+                        Text(if (error == null) "Install Linux files" else "Retry install")
+                    }
+                }
+            }
         }
+
+        Spacer(Modifier.height(18.dp))
+        Text(
+            text = "Python and git can be added later with pkg install. " +
+                "Keep CodeCell open while the files install.",
+            style = MaterialTheme.typography.labelSmall,
+            color = Cs.Dim,
+        )
     }
 }

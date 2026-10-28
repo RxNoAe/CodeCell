@@ -2,8 +2,6 @@ package dev.codecell.app
 
 import android.content.Context
 import android.net.Uri
-import android.os.Build
-import android.os.Environment
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -17,6 +15,7 @@ import dev.codecell.app.data.OpencodeClient
 import dev.codecell.app.data.QuestionRequest
 import dev.codecell.app.data.SessionInfo
 import dev.codecell.app.data.SessionMessage
+import dev.codecell.app.data.TermuxEnvironment
 import dev.codecell.app.data.Vault
 import dev.codecell.app.service.ServerService
 import java.io.File
@@ -137,15 +136,6 @@ class AppState(context: Context) {
                 return@launch
             }
 
-            if (config.treeUri != null &&
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                !Environment.isExternalStorageManager()
-            ) {
-                serverPhase = ServerPhase.Failed
-                serverStatus = "Allow file access in Settings to use your selected workspace."
-                return@launch
-            }
-
             val workspace = File(config.workspacePath).apply { mkdirs() }
             if (!workspace.exists()) {
                 serverPhase = ServerPhase.Failed
@@ -223,9 +213,7 @@ class AppState(context: Context) {
             workspacePath = config.workspacePath
             File(workspacePath).mkdirs()
             customAgents = vault.loadAgents()
-            val canAccess = Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
-                Environment.isExternalStorageManager()
-            if (canAccess) restartServer(scope)
+            restartServer(scope)
         }
     }
 
@@ -235,6 +223,7 @@ class AppState(context: Context) {
     }
 
     fun completeOnboarding() {
+        if (!TermuxEnvironment.isInstalled(appContext)) return
         config.onboarded = true
         onboarded = true
     }

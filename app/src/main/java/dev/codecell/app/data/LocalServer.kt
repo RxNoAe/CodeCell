@@ -77,6 +77,13 @@ object LocalServer {
         )
         builder.directory(workspace)
         builder.redirectErrorStream(true)
+        val termuxShell = TermuxEnvironment.shell(context)
+        val path = listOfNotNull(
+            termuxShell?.parentFile?.absolutePath,
+            context.applicationInfo.nativeLibraryDir,
+            "/system/bin",
+            "/system/xbin",
+        ).joinToString(":")
         builder.environment().apply {
             put("HOME", home.absolutePath)
             put("XDG_CONFIG_HOME", config.absolutePath)
@@ -85,8 +92,8 @@ object LocalServer {
             put("XDG_CACHE_HOME", cache.absolutePath)
             put("PREFIX", prefix.absolutePath)
             put("TMPDIR", tmp.absolutePath)
-            put("PATH", context.applicationInfo.nativeLibraryDir + ":/system/bin:/system/xbin")
-            put("SHELL", "/system/bin/sh")
+            put("PATH", path)
+            put("SHELL", termuxShell?.absolutePath ?: "/system/bin/sh")
             put("OPENCODE_SERVER_USERNAME", "opencode")
             if (password.isNotBlank()) put("OPENCODE_SERVER_PASSWORD", password)
         }

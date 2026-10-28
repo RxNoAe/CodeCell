@@ -45,6 +45,38 @@ jobs:
           rm -rf data.tar.* data ./data "$DEB"
           ls -lh app/src/main/jniLibs/arm64-v8a/libopencode.so
 
+      - name: Fetch proot runtime
+        run: |
+          set -euo pipefail
+          BASE="https://packages.termux.dev/apt/termux-main/pool/main"
+          fetch() {
+            curl -fsSL "$1" -o "$2"
+            echo "$3  $2" | sha256sum -c -
+          }
+          fetch "$BASE/p/proot/proot_5.1.107.101_aarch64.deb" proot.deb \
+            "a28355e9be257e1f87f4e9294b3118470d4fd7a5442fed8b278f4443c83407d7"
+          fetch "$BASE/libt/libtalloc/libtalloc_2.5.0_aarch64.deb" libtalloc.deb \
+            "556591f43bb773ad8777e1a29522640866a55f95dab71914418b94a8c58ad5a7"
+          fetch "$BASE/liba/libandroid-shmem/libandroid-shmem_0.7_aarch64.deb" libandroid-shmem.deb \
+            "0da3a24d558b93c92bcf8d611e0826a99ff96e396b148e6cdf33b47c47c57ff6"
+          for pkg in proot libtalloc libandroid-shmem; do
+            mkdir -p "$pkg"
+            (cd "$pkg" && ar x "../$pkg.deb" && tar -xf data.tar.*)
+          done
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp proot/data/data/com.termux/files/usr/bin/proot \
+            app/src/main/jniLibs/arm64-v8a/libproot.so
+          cp proot/data/data/com.termux/files/usr/libexec/proot/loader \
+            app/src/main/jniLibs/arm64-v8a/libprootloader.so
+          cp libtalloc/data/data/com.termux/files/usr/lib/libtalloc.so.2.5.0 \
+            app/src/main/jniLibs/arm64-v8a/libtalloc.so
+          cp libandroid-shmem/data/data/com.termux/files/usr/lib/libandroid-shmem.so \
+            app/src/main/jniLibs/arm64-v8a/libandroid-shmem.so
+          chmod 755 app/src/main/jniLibs/arm64-v8a/libproot.so \
+            app/src/main/jniLibs/arm64-v8a/libprootloader.so
+          rm -rf proot libtalloc libandroid-shmem data.tar.* proot.deb libtalloc.deb libandroid-shmem.deb
+          ls -lh app/src/main/jniLibs/arm64-v8a/
+
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 

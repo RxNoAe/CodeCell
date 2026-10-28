@@ -72,6 +72,7 @@ import dev.codecell.app.data.OpencodeClient
 import dev.codecell.app.data.ProviderAuthMethod
 import dev.codecell.app.data.ProviderCatalog
 import dev.codecell.app.data.ProviderInfo
+import dev.codecell.app.data.TermuxEnvironment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -87,15 +88,14 @@ fun SettingsSheet(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var name by remember { mutableStateOf(state.userName) }
+    var termuxInstalled by remember { mutableStateOf(TermuxEnvironment.isInstalled(context)) }
+    var termuxBusy by remember { mutableStateOf(false) }
+    var termuxProgress by remember { mutableStateOf(0f) }
+    var termuxError by remember { mutableStateOf<String?>(null) }
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
-        if (uri != null) {
-            state.attachFolder(uri, scope)
-            if (state.hasFolder && !hasAllFilesAccess(context)) {
-                openAllFilesSettings(context)
-            }
-        }
+        if (uri != null) state.attachFolder(uri, scope)
     }
 
     ModalBottomSheet(
@@ -192,25 +192,96 @@ fun SettingsSheet(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = { folderPicker.launch(null) },
-                        shape = RoundedCornerShape(12.dp),
+                OutlinedButton(
+                    onClick = { folderPicker.launch(null) },
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("Change folder", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+            Text("LINUX ENVIRONMENT", style = MaterialTheme.typography.labelSmall, color = Cs.Dim)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(cardShape)
+                    .background(Cs.Input.copy(alpha = 0.45f))
+                    .border(1.dp, Cs.LineSoft, cardShape)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = if (termuxInstalled) "Termux environment ready" else "Linux tools and pkg/apt",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Cs.Text,
+                )
+                Text(
+                    text = if (termuxInstalled) {
+                        "Chat commands can run bash and pkg. Install Python or git with pkg install."
+                    } else {
+                        "Downloads about 32 MB once. Stored inside CodeCell, so the APK stays small."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Cs.Muted,
+                )
+                if (termuxBusy) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("Change folder", style = MaterialTheme.typography.labelLarge)
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(15.dp),
+                            strokeWidth = 1.5.dp,
+                            color = Cs.Muted,
+                        )
+                        Text(
+                            text = "Installing ${(termuxProgress * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Cs.Muted,
+                        )
                     }
-                    if (state.hasFolder && !hasAllFilesAccess(context)) {
-                        OutlinedButton(
-                            onClick = { openAllFilesSettings(context) },
-                            shape = RoundedCornerShape(12.dp),
-                        ) {
-                            Text("Allow file access", style = MaterialTheme.typography.labelLarge)
+                }
+                termuxError?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Cs.Error,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                OutlinedButton(
+                    onClick = {
+                        if (!termuxBusy) {
+                            termuxBusy = true
+                            termuxError = null
+                            termuxProgress = 0f
+                            scope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        TermuxEnvironment.install(context) { progress ->
+                                            termuxProgress = progress
+                                        }
+                                    }
+                                }
+                                result.onSuccess {
+                                    termuxInstalled = true
+                                    state.restartServer(scope)
+                                }.onFailure {
+                                    termuxError = it.message ?: "Could not install the environment"
+                                }
+                                termuxBusy = false
+                            }
                         }
-                    }
+                    },
+                    enabled = !termuxBusy,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (termuxInstalled) "Reinstall environment" else "Install environment")
                 }
             }
             Text(
-                "opencode 1.19.4 is built into this app. No Termux or extra server needed.",
+                "Linux tools are installed once and shared by chat commands.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Cs.Dim,
             )

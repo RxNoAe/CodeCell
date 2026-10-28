@@ -9,8 +9,8 @@ android {
 
     defaultConfig {
         applicationId = "dev.codecell.app"
-        minSdk = 29
-        targetSdk = 36
+        minSdk = 28
+        targetSdk = 28
         versionCode = 1
         versionName = "1.0"
 
