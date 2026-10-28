@@ -2,6 +2,8 @@ package dev.codecell.app.ui
 
 import android.content.Context
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -31,19 +34,26 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,6 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -72,84 +83,349 @@ import dev.codecell.app.AppState
 import dev.codecell.app.ChatMessage
 import dev.codecell.app.R
 import dev.codecell.app.Role
+import dev.codecell.app.data.SessionInfo
 import java.util.Calendar
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 @Composable
 fun CodeCellApp(state: AppState) {
     var showSettings by remember { mutableStateOf(false) }
     var showModels by remember { mutableStateOf(false) }
+    var showAgents by remember { mutableStateOf(false) }
+    var showCustomAgent by remember { mutableStateOf(false) }
     var draft by rememberSaveable { mutableStateOf("") }
+
     val scope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            state.attachFolder(uri)
+            state.refreshAgents(scope)
+        } else {
+            state.markFolderPrompted()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        state.refreshAgents(scope)
+        if (!state.hasFolder && !state.folderPrompted) {
+            folderPicker.launch(null)
+        }
+    }
+
+    LaunchedEffect(drawerState.isOpen) {
+        if (drawerState.isOpen) state.refreshSessions(scope)
+    }
 
     CodeCellTheme {
-        Surface(color = Cs.Bg, modifier = Modifier.fillMaxSize()) {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .imePadding(),
-            ) {
-                TopBar(
-                    onMenu = { showSettings = true },
-                    onNewChat = {
-                        state.newChat()
-                        draft = ""
-                    },
-                )
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                    if (state.messages.isEmpty() && !state.sending) {
-                        EmptyState(state.userName)
-                    } else {
-                        MessageList(state, scope)
-                    }
-                }
-                Composer(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    onSend = {
-                        if (draft.isNotBlank() && !state.sending) {
-                            val text = draft
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            gesturesEnabled = drawerState.isOpen,
+            scrimColor = Color.Black.copy(alpha = 0.5f),
+            drawerContent = {
+                ModalDrawerSheet(
+                    drawerContainerColor = Cs.Sheet,
+                    drawerContentColor = Cs.Text,
+                ) {
+                    DrawerContent(
+                        state = state,
+                        onClose = { scope.launch { drawerState.close() } },
+                        onNewChat = {
+                            state.newChat()
                             draft = ""
-                            state.send(text, scope)
+                            scope.launch { drawerState.close() }
+                        },
+                        onOpenSession = { session ->
+                            state.openSession(session, scope)
+                            scope.launch { drawerState.close() }
+                        },
+                        onSettings = {
+                            showSettings = true
+                            scope.launch { drawerState.close() }
+                        },
+                    )
+                }
+            },
+        ) {
+            Surface(color = Cs.Bg, modifier = Modifier.fillMaxSize()) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .imePadding(),
+                ) {
+                    TopBar(
+                        onMenu = { scope.launch { drawerState.open() } },
+                        agentLabel = state.agentLabel,
+                        onAgent = { showAgents = true },
+                        onNewChat = {
+                            state.newChat()
+                            draft = ""
+                        },
+                    )
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        when {
+                            state.loadingHistory -> Box(
+                                Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Cs.Muted,
+                                )
+                            }
+
+                            state.messages.isEmpty() && !state.sending -> EmptyState(state.userName)
+                            else -> MessageList(state, scope)
                         }
-                    },
-                    modelLabel = state.modelLabel,
-                    onModels = { showModels = true },
-                    onNewChat = {
-                        state.newChat()
-                        draft = ""
-                    },
-                )
+                    }
+                    Composer(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        onSend = {
+                            if (draft.isNotBlank() && !state.sending) {
+                                val text = draft
+                                draft = ""
+                                state.send(text, scope)
+                            }
+                        },
+                        modelLabel = state.modelLabel,
+                        onModels = { showModels = true },
+                        onNewChat = {
+                            state.newChat()
+                            draft = ""
+                        },
+                    )
+                }
             }
         }
 
         if (showSettings) {
-            SettingsSheet(state, onDismiss = { showSettings = false })
+            SettingsSheet(
+                state = state,
+                onDismiss = { showSettings = false },
+                onChooseFolder = {
+                    showSettings = false
+                    folderPicker.launch(null)
+                },
+            )
         }
         if (showModels) {
             ModelsSheet(state, onDismiss = { showModels = false })
+        }
+        if (showAgents) {
+            AgentSheet(
+                state = state,
+                onDismiss = { showAgents = false },
+                onAddCustom = {
+                    showAgents = false
+                    showCustomAgent = true
+                },
+            )
+        }
+        if (showCustomAgent) {
+            CustomAgentDialog(
+                onDismiss = { showCustomAgent = false },
+                onSave = { name, prompt ->
+                    state.addCustomAgent(name, prompt)
+                    showCustomAgent = false
+                },
+            )
         }
     }
 }
 
 @Composable
-private fun TopBar(onMenu: () -> Unit, onNewChat: () -> Unit) {
-    Row(
+private fun TopBar(
+    onMenu: () -> Unit,
+    agentLabel: String,
+    onAgent: () -> Unit,
+    onNewChat: () -> Unit,
+) {
+    Box(
         Modifier
             .fillMaxWidth()
             .height(54.dp)
             .padding(horizontal = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onMenu) {
-            Icon(Icons.Filled.Menu, contentDescription = "Settings", tint = Cs.Text)
+        IconButton(onClick = onMenu, modifier = Modifier.align(Alignment.CenterStart)) {
+            Icon(Icons.Filled.Menu, contentDescription = "Sessions", tint = Cs.Text)
         }
-        Spacer(Modifier.weight(1f))
-        IconButton(onClick = onNewChat) {
+        AgentChip(
+            label = agentLabel,
+            onClick = onAgent,
+            modifier = Modifier.align(Alignment.Center),
+        )
+        IconButton(onClick = onNewChat, modifier = Modifier.align(Alignment.CenterEnd)) {
             Icon(Icons.Filled.Add, contentDescription = "New chat", tint = Cs.Text)
         }
+    }
+}
+
+@Composable
+private fun AgentChip(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .widthIn(max = 180.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Cs.Input)
+            .clickable(onClick = onClick)
+            .padding(start = 12.dp, end = 6.dp, top = 7.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.SmartToy,
+            contentDescription = null,
+            tint = Cs.Muted,
+            modifier = Modifier.size(15.dp),
+        )
+        Spacer(Modifier.size(6.dp))
+        Text(
+            text = label,
+            color = Cs.Text,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 120.dp),
+        )
+        Icon(
+            Icons.Filled.ExpandMore,
+            contentDescription = null,
+            tint = Cs.Muted,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+@Composable
+private fun DrawerContent(
+    state: AppState,
+    onClose: () -> Unit,
+    onNewChat: () -> Unit,
+    onOpenSession: (SessionInfo) -> Unit,
+    onSettings: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxHeight()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 12.dp),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, top = 8.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "CodeCell",
+                color = Cs.Text,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Filled.Close, contentDescription = "Close", tint = Cs.Muted)
+            }
+        }
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onNewChat)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = null, tint = Cs.Text, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.size(10.dp))
+            Text("New chat", color = Cs.Text, fontSize = 14.sp)
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = "SESSIONS",
+            color = Cs.Dim,
+            fontSize = 10.sp,
+            letterSpacing = 1.4.sp,
+            modifier = Modifier.padding(start = 12.dp, bottom = 6.dp),
+        )
+
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                state.sessionsLoading -> Box(
+                    Modifier.fillMaxWidth().height(56.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 1.5.dp,
+                        color = Cs.Muted,
+                    )
+                }
+
+                state.sessions.isEmpty() -> Text(
+                    text = "No sessions yet",
+                    color = Cs.Dim,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 12.dp, top = 4.dp),
+                )
+
+                else -> LazyColumn(Modifier.fillMaxSize()) {
+                    items(state.sessions, key = { it.id }) { session ->
+                        SessionRow(
+                            session = session,
+                            selected = session.id == state.sessionId,
+                            onClick = { onOpenSession(session) },
+                        )
+                    }
+                }
+            }
+        }
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onSettings)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Settings, contentDescription = null, tint = Cs.Muted, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Settings", color = Cs.Text, fontSize = 13.sp)
+                Text(state.folderLabel, color = Cs.Dim, fontSize = 10.sp, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionRow(session: SessionInfo, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) Cs.Input else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = session.title,
+            color = if (selected) Cs.Text else Color(0xFFC2C2C8),
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -265,7 +541,7 @@ private fun AssistantActions(onCopy: () -> Unit, onShare: () -> Unit) {
 }
 
 @Composable
-private fun StaticIcon(icon: androidx.compose.ui.graphics.vector.ImageVector) {
+private fun StaticIcon(icon: ImageVector) {
     Icon(
         imageVector = icon,
         contentDescription = null,

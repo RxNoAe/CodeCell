@@ -15,7 +15,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.codecell.app.AppState
+import dev.codecell.app.data.AgentOption
 import dev.codecell.app.data.ModelOption
 import dev.codecell.app.data.OpencodeClient
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +54,11 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsSheet(state: AppState, onDismiss: () -> Unit) {
+fun SettingsSheet(
+    state: AppState,
+    onDismiss: () -> Unit,
+    onChooseFolder: () -> Unit,
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
 
@@ -97,6 +104,34 @@ fun SettingsSheet(state: AppState, onDismiss: () -> Unit) {
                 colors = fieldColors(),
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            Text("STORAGE", color = Cs.Dim, fontSize = 10.sp, letterSpacing = 1.3.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Folder",
+                        color = Cs.Text,
+                        fontSize = 13.sp,
+                    )
+                    Text(
+                        state.folderLabel,
+                        color = Cs.Muted,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                OutlinedButton(onClick = onChooseFolder) {
+                    Text(if (state.hasFolder) "Change" else "Choose")
+                }
+            }
+            Text(
+                "Sessions and custom agents are saved in the CodeCell folder on shared storage.",
+                color = Cs.Dim,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -142,6 +177,160 @@ fun SettingsSheet(state: AppState, onDismiss: () -> Unit) {
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AgentSheet(
+    state: AppState,
+    onDismiss: () -> Unit,
+    onAddCustom: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Cs.Sheet,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Agent",
+                    color = Cs.Text,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onAddCustom) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = null,
+                        tint = Cs.Muted,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.size(4.dp))
+                    Text("Custom", color = Cs.Muted, fontSize = 13.sp)
+                }
+            }
+
+            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(state.agentOptions(), key = { it.name }) { agent ->
+                    AgentRow(
+                        agent = agent,
+                        selected = state.agentLabel == agent.name,
+                        onClick = {
+                            state.selectAgent(agent)
+                            onDismiss()
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentRow(agent: AgentOption, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = agent.name,
+                    color = Cs.Text,
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (agent.isCustom) {
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        text = "CUSTOM",
+                        color = Cs.Dim,
+                        fontSize = 9.sp,
+                        letterSpacing = 1.sp,
+                    )
+                }
+            }
+            Text(
+                text = agent.description,
+                color = Cs.Muted,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (selected) {
+            Icon(
+                Icons.Filled.Check,
+                contentDescription = null,
+                tint = Cs.Text,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+@Composable
+fun CustomAgentDialog(onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var prompt by remember { mutableStateOf("") }
+    val valid = name.isNotBlank() && prompt.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Cs.Sheet,
+        titleContentColor = Cs.Text,
+        textContentColor = Cs.Muted,
+        title = { Text("Custom agent") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    colors = fieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    label = { Text("System prompt") },
+                    minLines = 4,
+                    maxLines = 8,
+                    colors = fieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (valid) onSave(name, prompt) },
+                enabled = valid,
+            ) {
+                Text("Save", color = if (valid) Cs.Text else Cs.Dim)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Cs.Muted)
+            }
+        },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

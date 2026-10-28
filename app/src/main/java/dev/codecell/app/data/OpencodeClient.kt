@@ -31,12 +31,58 @@ object OpencodeClient {
         return id
     }
 
+    fun listSessions(baseUrl: String): List<SessionInfo> {
+        val raw = request("GET", url(baseUrl, "/session"), null)
+        val array = JSONArray(raw)
+        val result = mutableListOf<SessionInfo>()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val id = item.optString("id")
+            if (id.isBlank()) continue
+            val title = item.optString("title").takeIf { it.isNotBlank() } ?: "New chat"
+            val updated = item.optJSONObject("time")?.optLong("updated") ?: 0L
+            result += SessionInfo(id, title, updated)
+        }
+        return result
+    }
+
+    fun loadMessages(baseUrl: String, sessionId: String): List<SessionMessage> {
+        val raw = request("GET", url(baseUrl, "/session/$sessionId/message"), null)
+        val array = JSONArray(raw)
+        val result = mutableListOf<SessionMessage>()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val role = item.optJSONObject("info")?.optString("role")
+                ?.takeIf { it == "user" || it == "assistant" } ?: continue
+            val text = joinText(item.optJSONArray("parts"))
+            if (text.isNotBlank()) result += SessionMessage(role, text)
+        }
+        return result
+    }
+
+    fun listAgents(baseUrl: String): List<AgentOption> {
+        val raw = request("GET", url(baseUrl, "/agent"), null)
+        val array = JSONArray(raw)
+        val result = linkedMapOf<String, AgentOption>()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val name = item.optString("name").takeIf { it.isNotBlank() } ?: continue
+            if (item.optString("mode") == "subagent") continue
+            val description = item.optString("description")
+                .takeIf { it.isNotBlank() } ?: "Agent"
+            result[name] = AgentOption(name, description)
+        }
+        return result.values.toList()
+    }
+
     fun sendMessage(
         baseUrl: String,
         sessionId: String,
         text: String,
         providerID: String?,
         modelID: String?,
+        agent: String?,
+        system: String?,
     ): String {
         val payload = JSONObject().apply {
             if (!providerID.isNullOrBlank() && !modelID.isNullOrBlank()) {
@@ -47,6 +93,8 @@ object OpencodeClient {
                         .put("modelID", modelID),
                 )
             }
+            if (!agent.isNullOrBlank()) put("agent", agent)
+            if (!system.isNullOrBlank()) put("system", system)
             put(
                 "parts",
                 JSONArray().put(JSONObject().put("type", "text").put("text", text)),
@@ -81,25 +129,28 @@ object OpencodeClient {
         return result.sortedBy { it.name.lowercase() }
     }
 
+    private fun joinText(parts: JSONArray?): String {
+        if (parts == null) return ""
+        val builder = StringBuilder()
+        for (i in 0 until parts.length()) {
+            val part = parts.optJSONObject(i) ?: continue
+            if (part.optString("type") == "text") {
+                val chunk = part.optString("text")
+                if (chunk.isNotBlank()) {
+                    if (builder.isNotEmpty()) builder.append("\n\n")
+                    builder.append(chunk)
+                }
+            }
+        }
+        return builder.toString()
+    }
+
     private fun extractReply(raw: String): String {
         val root = runCatching { JSONObject(raw) }
             .getOrElse { throw OpencodeException(raw.take(300).ifBlank { "Empty response" }) }
 
-        val builder = StringBuilder()
-        val parts = root.optJSONArray("parts")
-        if (parts != null) {
-            for (i in 0 until parts.length()) {
-                val part = parts.optJSONObject(i) ?: continue
-                if (part.optString("type") == "text") {
-                    val chunk = part.optString("text")
-                    if (chunk.isNotBlank()) {
-                        if (builder.isNotEmpty()) builder.append("\n\n")
-                        builder.append(chunk)
-                    }
-                }
-            }
-        }
-        if (builder.isNotEmpty()) return builder.toString()
+        val text = joinText(root.optJSONArray("parts"))
+        if (text.isNotBlank()) return text
 
         val info = root.optJSONObject("info")
         val error = info?.optJSONObject("error")
