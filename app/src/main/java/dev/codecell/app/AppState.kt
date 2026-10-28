@@ -49,6 +49,7 @@ class AppState(context: Context) {
     private val config = AppConfig(appContext)
     private val vault = Vault(appContext, config)
     private var nextId = 1L
+    private val seenAssistantIds = mutableSetOf<String>()
 
     var serverUrl by mutableStateOf(AppConfig.DEFAULT_SERVER)
     var serverPhase by mutableStateOf(ServerPhase.Stopped)
@@ -270,6 +271,7 @@ class AppState(context: Context) {
         messages = emptyList()
         liveMessageId = null
         pendingQuestions = emptyList()
+        seenAssistantIds.clear()
     }
 
     fun refreshAgents(scope: CoroutineScope) {
@@ -306,12 +308,14 @@ class AppState(context: Context) {
         sessionTitle = target.title
         messages = emptyList()
         liveMessageId = null
+        seenAssistantIds.clear()
         loadingHistory = true
         scope.launch {
             try {
                 val loaded = withContext(Dispatchers.IO) {
                     OpencodeClient.loadMessages(serverUrl, target.id)
                 }
+                rememberAssistantIds(loaded)
                 messages = loaded.map { message ->
                     ChatMessage(
                         id = nextId++,
@@ -376,6 +380,7 @@ class AppState(context: Context) {
                     OpencodeClient.loadMessages(serverUrl, id)
                 }
             }.onSuccess { loaded ->
+                rememberAssistantIds(loaded)
                 messages = loaded.map { item ->
                     ChatMessage(
                         id = nextId++,
@@ -403,10 +408,9 @@ class AppState(context: Context) {
             ChatPart(type = "file", title = it.name, text = it.mime)
         }
 
-        val baselineAssistantIds = messages
+        val baselineAssistantIds = seenAssistantIds + messages
             .filter { it.role == Role.Assistant }
             .mapNotNull { it.serverId }
-            .toSet()
         val userMessage = append(Role.User, display, parts = userParts)
         sending = true
         userStopped = false
@@ -440,6 +444,7 @@ class AppState(context: Context) {
                                 val parts = fresh.flatMap { it.parts }
                                 val serverId = fresh.last().id
                                 withContext(Dispatchers.Main) {
+                                    seenAssistantIds += fresh.map { it.id }
                                     val live = liveMessageId
                                     if (live == null) {
                                         val message = ChatMessage(
@@ -510,6 +515,7 @@ class AppState(context: Context) {
                     .ifBlank { sent.text }
                 val finalParts = fresh.flatMap { it.parts }.ifEmpty { sent.parts }
                 val finalServerId = fresh.lastOrNull()?.id ?: sent.assistantID
+                seenAssistantIds += fresh.map { it.id }
                 sent.userID?.let { userID ->
                     messages = messages.map {
                         if (it.id == userMessage.id) it.copy(serverId = userID) else it
@@ -679,6 +685,13 @@ class AppState(context: Context) {
         }
     }
 
+    private fun rememberAssistantIds(items: List<SessionMessage>) {
+        seenAssistantIds.clear()
+        seenAssistantIds += items.asSequence()
+            .filter { it.role == "assistant" && it.id.isNotBlank() }
+            .map { it.id }
+    }
+
     private fun append(
         role: Role,
         text: String,
@@ -730,6 +743,7 @@ class AppState(context: Context) {
                 val loaded = withContext(Dispatchers.IO) {
                     OpencodeClient.loadMessages(serverUrl, session)
                 }
+                rememberAssistantIds(loaded)
                 messages = loaded.map { item ->
                     ChatMessage(
                         id = nextId++,
