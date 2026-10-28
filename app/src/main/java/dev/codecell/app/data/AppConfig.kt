@@ -11,6 +11,7 @@ data class ModelOption(
     val name: String,
     val variant: String? = null,
     val variants: List<String> = emptyList(),
+    val free: Boolean = false,
 )
 
 data class AgentOption(

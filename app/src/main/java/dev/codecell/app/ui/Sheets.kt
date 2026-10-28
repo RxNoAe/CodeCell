@@ -601,64 +601,80 @@ fun ModelsSheet(
                     )
                 }
 
-                else -> LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                    item(key = "default") {
-                        ModelRow(
-                            name = "Server default",
-                            subtitle = "Let opencode pick the model",
-                            selected = state.model == null,
-                            onClick = {
-                                state.selectModel(null)
-                                onDismiss()
-                            },
-                        )
-                    }
+                else -> {
                     val filtered = options.filter {
                         query.isBlank() ||
                             it.name.contains(query, ignoreCase = true) ||
                             it.providerID.contains(query, ignoreCase = true) ||
                             it.modelID.contains(query, ignoreCase = true)
                     }
-                    if (filtered.isEmpty()) {
-                        item(key = "empty") {
-                            Text(
-                                "No models match that search.",
-                                color = Cs.Dim,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 18.dp),
+                    val freeModels = filtered.filter { it.free }
+                    val otherModels = filtered.filterNot { it.free }
+                    LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                        item(key = "default") {
+                            ModelRow(
+                                name = "Server default",
+                                subtitle = "Let opencode pick the model",
+                                selected = state.model == null,
+                                onClick = {
+                                    state.selectModel(null)
+                                    onDismiss()
+                                },
                             )
                         }
-                    }
-                    items(filtered, key = { "${it.providerID}/${it.modelID}" }) { option ->
-                        val selected = state.model?.providerID == option.providerID &&
-                            state.model?.modelID == option.modelID
-                        val currentVariant = state.model?.variant
-                        ModelRow(
-                            name = option.name,
-                            subtitle = buildString {
-                                append(option.providerID)
-                                append('/')
-                                append(option.modelID)
-                                if (selected && !currentVariant.isNullOrBlank()) {
-                                    append(" · ")
-                                    append(currentVariant)
-                                } else if (option.variants.isNotEmpty()) {
-                                    append(" · ")
-                                    append(option.variants.size)
-                                    append(" variants")
-                                }
-                            },
-                            selected = selected,
-                            hasVariants = option.variants.isNotEmpty(),
-                            onClick = {
-                                if (option.variants.isNotEmpty()) {
-                                    variantTarget = option
-                                } else {
-                                    state.selectModel(option)
-                                    onDismiss()
-                                }
-                            },
-                        )
+                        if (filtered.isEmpty()) {
+                            item(key = "empty") {
+                                Text(
+                                    "No models match that search.",
+                                    color = Cs.Dim,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(
+                                        horizontal = 13.dp,
+                                        vertical = 18.dp,
+                                    ),
+                                )
+                            }
+                        }
+                        if (freeModels.isNotEmpty()) {
+                            item(key = "free-label") { ModelSectionLabel("FREE MODELS") }
+                            items(
+                                freeModels,
+                                key = { "${it.providerID}/${it.modelID}" },
+                            ) { option ->
+                                ModelOptionRow(
+                                    option = option,
+                                    state = state,
+                                    onClick = {
+                                        if (option.variants.isNotEmpty()) {
+                                            variantTarget = option
+                                        } else {
+                                            state.selectModel(option)
+                                            onDismiss()
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                        if (otherModels.isNotEmpty()) {
+                            item(key = "other-label") { ModelSectionLabel("OTHER MODELS") }
+                            items(
+                                otherModels,
+                                key = { "${it.providerID}/${it.modelID}" },
+                            ) { option ->
+                                ModelOptionRow(
+                                    option = option,
+                                    state = state,
+                                    onClick = {
+                                        if (option.variants.isNotEmpty()) {
+                                            variantTarget = option
+                                        } else {
+                                            state.selectModel(option)
+                                            onDismiss()
+                                        }
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -683,6 +699,47 @@ fun ModelsSheet(
             },
         )
     }
+}
+
+@Composable
+private fun ModelSectionLabel(text: String) {
+    Text(
+        text = text,
+        color = Cs.Dim,
+        style = MaterialTheme.typography.labelSmall,
+        modifier = Modifier.padding(start = 13.dp, top = 10.dp, bottom = 2.dp),
+    )
+}
+
+@Composable
+private fun ModelOptionRow(
+    option: ModelOption,
+    state: AppState,
+    onClick: () -> Unit,
+) {
+    val selected = state.model?.providerID == option.providerID &&
+        state.model?.modelID == option.modelID
+    val currentVariant = state.model?.variant
+    ModelRow(
+        name = option.name,
+        subtitle = buildString {
+            append(option.providerID)
+            append('/')
+            append(option.modelID)
+            if (selected && !currentVariant.isNullOrBlank()) {
+                append(" · ")
+                append(currentVariant)
+            } else if (option.variants.isNotEmpty()) {
+                append(" · ")
+                append(option.variants.size)
+                append(" variants")
+            }
+        },
+        selected = selected,
+        hasVariants = option.variants.isNotEmpty(),
+        free = option.free,
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -770,6 +827,7 @@ private fun ModelRow(
     subtitle: String,
     selected: Boolean,
     hasVariants: Boolean = false,
+    free: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -799,6 +857,18 @@ private fun ModelRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+        if (free) {
+            Text(
+                text = "FREE",
+                color = Cs.Success,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Cs.Success.copy(alpha = 0.12f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+            Spacer(Modifier.width(6.dp))
         }
         if (hasVariants) {
             Icon(

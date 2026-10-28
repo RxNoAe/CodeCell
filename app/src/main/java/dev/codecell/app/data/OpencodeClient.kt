@@ -416,10 +416,24 @@ object OpencodeClient {
                 val label = model?.optString("name")?.takeIf { it.isNotBlank() } ?: modelID
                 val variants = model?.optJSONObject("variants")
                     ?.keys()?.asSequence()?.toList().orEmpty()
-                result += ModelOption(providerID, modelID, label, variants = variants)
+                val cost = model?.optJSONObject("cost")
+                val free = (cost != null &&
+                    cost.optDouble("input", -1.0) == 0.0 &&
+                    cost.optDouble("output", -1.0) == 0.0) ||
+                    modelID.contains("free", ignoreCase = true)
+                result += ModelOption(
+                    providerID = providerID,
+                    modelID = modelID,
+                    name = label,
+                    variants = variants,
+                    free = free,
+                )
             }
         }
-        return result.sortedBy { it.name.lowercase() }
+        return result.sortedWith(
+            compareByDescending<ModelOption> { it.free }
+                .thenBy { it.name.lowercase() },
+        )
     }
 
     private fun parseQuestions(array: JSONArray?): List<QuestionInfo> {
