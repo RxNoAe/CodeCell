@@ -12,7 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -27,6 +27,24 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Fetch opencode runtime
+        env:
+          OPENCODE_VERSION: "1.19.4"
+          OPENCODE_DEB_SHA256: "7ad3b52f3568d668d7187bcafc5eb2039375de0698b6e533c48424897e42af02"
+        run: |
+          set -euo pipefail
+          DEB="opencode_${OPENCODE_VERSION}_aarch64.deb"
+          URL="https://github.com/bd-loser/opencode-bionic/releases/download/v${OPENCODE_VERSION}/${DEB}"
+          curl -fsSL "$URL" -o "$DEB"
+          echo "${OPENCODE_DEB_SHA256}  ${DEB}" | sha256sum -c -
+          ar x "$DEB"
+          TARBALL=$(ls data.tar.*)
+          tar -xf "$TARBALL" ./data/data/com.termux/files/usr/bin/opencode
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp ./data/data/com.termux/files/usr/bin/opencode app/src/main/jniLibs/arm64-v8a/libopencode.so
+          rm -rf data.tar.* data ./data "$DEB"
+          ls -lh app/src/main/jniLibs/arm64-v8a/libopencode.so
+
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
@@ -37,7 +55,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CodeCell-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: CodeCell-1.0.${{ github.run_number }}.apk
           if-no-files-found: error
 
       - name: Publish GitHub release

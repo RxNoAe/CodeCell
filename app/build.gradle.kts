@@ -13,6 +13,17 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libopencode.so"
+        }
     }
 
     buildTypes {
@@ -30,12 +41,6 @@ android {
     buildFeatures {
         compose = true
     }
-
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
-    }
 }
 
 kotlin {
@@ -50,6 +55,7 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.1.0")
 
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    implementation("androidx.compose.animation:animation")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
