@@ -10,9 +10,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import dev.codecell.app.ui.CodeCellApp
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var state: AppState
 
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -28,9 +31,15 @@ class MainActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
+        state = AppState(applicationContext)
         setContent {
-            val state = remember { AppState(applicationContext) }
-            CodeCellApp(state)
+            val appState = remember { state }
+            CodeCellApp(appState)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::state.isInitialized) state.ensureServer(lifecycleScope)
     }
 }

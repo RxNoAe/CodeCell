@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ForkRight
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
@@ -143,6 +144,7 @@ import dev.codecell.app.data.Attachment
 import dev.codecell.app.data.ChatPart
 import dev.codecell.app.data.QuestionRequest
 import dev.codecell.app.data.SessionInfo
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -1695,7 +1697,7 @@ private fun TypingRow() {
 
 @Composable
 private fun MessageParts(parts: List<ChatPart>, isError: Boolean) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         parts.forEach { part ->
             when (part.type) {
                 "text" -> Text(
@@ -1760,16 +1762,24 @@ private fun ReasoningCard(text: String) {
             )
         }
         Spacer(Modifier.height(6.dp))
-        ExpandablePlain(text, Cs.Muted, maxLines = 8)
+        ExpandablePlain(text, Cs.Muted, maxLines = 2)
     }
 }
 
 @Composable
 private fun ToolCard(part: ChatPart) {
     val accent = toolAccent(part.tool)
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(12.dp)
+    val snippet = toolSnippet(part)
+    val code = toolCode(part)
+    val showCode = code.isNotBlank() && snippet != code
+    val hasMore = showCode ||
+        part.output.isNotBlank() ||
+        part.error.isNotBlank() ||
+        (part.detail.isNotBlank() && part.detail != "{}")
+    var expanded by remember(part.id, part.status) { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
-    val copyText = listOf(part.title, part.input, part.output, part.error, part.detail)
+    val copyText = listOf(code, part.output, part.error)
         .filter { it.isNotBlank() }
         .joinToString("\n\n")
 
@@ -1777,76 +1787,77 @@ private fun ToolCard(part: ChatPart) {
         Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(accent.copy(alpha = 0.06f))
-            .border(1.dp, accent.copy(alpha = 0.32f), shape),
+            .background(accent.copy(alpha = 0.05f)),
     ) {
         Row(
-            modifier = Modifier.padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 4.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = hasMore) { expanded = !expanded }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(accent.copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = toolIcon(part.tool),
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(15.dp),
-                )
-            }
-            Spacer(Modifier.width(9.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = toolLabel(part.tool),
-                    color = accent,
-                    style = MaterialTheme.typography.labelSmall,
-                )
-                if (part.title.isNotBlank()) {
-                    Text(
-                        text = part.title,
-                        color = Cs.Body,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
+            Icon(
+                imageVector = toolIcon(part.tool),
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(13.dp),
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                text = snippet.ifBlank {
+                    part.title.ifBlank { toolLabel(part.tool) }
+                },
+                color = Cs.Body,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 16.sp,
+                ),
+                maxLines = if (expanded) 6 else 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(6.dp))
             ToolStatus(part.status, accent)
-            if (copyText.isNotBlank()) {
+            if (expanded && copyText.isNotBlank()) {
                 IconButton(
                     onClick = { clipboard.setText(AnnotatedString(copyText)) },
-                    modifier = Modifier.size(30.dp),
+                    modifier = Modifier.size(26.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Filled.ContentCopy,
                         contentDescription = "Copy activity",
                         tint = Cs.Dim,
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(13.dp),
                     )
                 }
             }
+            if (hasMore) {
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "Hide details" else "Show details",
+                    tint = Cs.Dim,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
         }
-        if (part.input.isNotBlank()) {
-            SectionLabel("INPUT")
-            ExpandableCode(part.input, Cs.Muted, maxLines = 10)
+        if (expanded) {
+            if (showCode) {
+                ExpandableCode(code, Cs.Body, maxLines = 14)
+            }
+            if (part.error.isNotBlank()) {
+                SectionLabel("ERROR")
+                ExpandableCode(part.error, Cs.Error, maxLines = 8)
+            }
+            if (part.output.isNotBlank()) {
+                SectionLabel("OUTPUT")
+                ExpandableCode(part.output, Cs.Dim, maxLines = 10)
+            }
+            if (part.detail.isNotBlank() && part.detail != "{}") {
+                SectionLabel("DETAILS")
+                ExpandableCode(part.detail, Cs.Dim, maxLines = 6)
+            }
+            Spacer(Modifier.height(6.dp))
         }
-        if (part.output.isNotBlank()) {
-            SectionLabel("OUTPUT")
-            ExpandableCode(part.output, Cs.Body, maxLines = 12)
-        }
-        if (part.error.isNotBlank()) {
-            SectionLabel("ERROR")
-            ExpandableCode(part.error, Cs.Error, maxLines = 8)
-        }
-        if (part.detail.isNotBlank() && part.detail != "{}") {
-            SectionLabel("DETAILS")
-            ExpandableCode(part.detail, Cs.Dim, maxLines = 6)
-        }
-        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -1984,60 +1995,18 @@ private fun SectionLabel(text: String) {
 
 @Composable
 private fun ToolStatus(status: String, accent: Color) {
-    val label: String
-    val color: Color
-    val icon: ImageVector?
     when (status) {
-        "running" -> {
-            label = "Running"
-            color = accent
-            icon = null
-        }
+        "running", "pending" -> CircularProgressIndicator(
+            modifier = Modifier.size(11.dp),
+            color = accent,
+            strokeWidth = 1.5.dp,
+        )
 
-        "pending" -> {
-            label = "Queued"
-            color = Cs.Muted
-            icon = null
-        }
-
-        "completed" -> {
-            label = "Done"
-            color = Cs.Success
-            icon = Icons.Filled.CheckCircle
-        }
-
-        "error" -> {
-            label = "Error"
-            color = Cs.Error
-            icon = Icons.Filled.ErrorOutline
-        }
-
-        else -> {
-            label = status.ifBlank { "Tool" }
-            color = Cs.Dim
-            icon = null
-        }
-    }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        if (icon != null) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = color,
-                modifier = Modifier.size(13.dp),
-            )
-        } else if (status == "running" || status == "pending") {
-            CircularProgressIndicator(
-                modifier = Modifier.size(12.dp),
-                color = color,
-                strokeWidth = 1.5.dp,
-            )
-        }
-        Spacer(Modifier.width(4.dp))
-        Text(
-            text = label,
-            color = color,
-            style = MaterialTheme.typography.labelSmall,
+        "error" -> Icon(
+            imageVector = Icons.Filled.ErrorOutline,
+            contentDescription = "Tool failed",
+            tint = Cs.Error,
+            modifier = Modifier.size(13.dp),
         )
     }
 }
@@ -2350,6 +2319,35 @@ private fun toolAccent(tool: String): Color = when {
     tool == "webfetch" -> Cs.ToolNet
     tool == "task" -> Cs.ToolAgent
     else -> Cs.Muted
+}
+
+private fun toolCode(part: ChatPart): String {
+    val input = runCatching { JSONObject(part.input) }.getOrNull() ?: return ""
+    return when (part.tool) {
+        "bash", "shell" -> input.optString("command")
+        "edit" -> input.optString("newString").ifBlank { input.optString("oldString") }
+        "write" -> input.optString("content")
+        else -> ""
+    }
+}
+
+private fun toolSnippet(part: ChatPart): String {
+    val input = runCatching { JSONObject(part.input) }.getOrNull()
+    fun value(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
+        input?.optString(key)?.takeIf { it.isNotBlank() }
+    }
+    val text = when (part.tool) {
+        "bash", "shell" -> value("command")
+        "edit", "write" -> value("filePath", "path") ?: toolCode(part)
+        "read" -> value("filePath", "path")
+        "grep", "glob", "list" -> listOfNotNull(value("pattern"), value("path"))
+            .joinToString("  ")
+
+        "webfetch" -> value("url")
+        "task" -> value("description", "prompt")
+        else -> value("command", "filePath", "path", "pattern", "query", "url", "description")
+    } ?: part.title
+    return text.lineSequence().firstOrNull()?.trim()?.take(180).orEmpty()
 }
 
 private fun toolLabel(tool: String): String = when (tool) {

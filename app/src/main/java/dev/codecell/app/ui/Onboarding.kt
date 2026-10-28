@@ -1,5 +1,11 @@
 package dev.codecell.app.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -95,7 +101,7 @@ fun OnboardingScreen(state: AppState, scope: CoroutineScope) {
                     if (page == 0) {
                         ProviderSetup(state = state, scope = scope)
                     } else {
-                        FolderSetup(state = state)
+                        FolderSetup(state = state, scope = scope)
                     }
                 }
                 Spacer(Modifier.height(14.dp))
@@ -463,15 +469,18 @@ private fun ServerSetupStatus(state: AppState, scope: CoroutineScope) {
 }
 
 @Composable
-private fun FolderSetup(state: AppState) {
+private fun FolderSetup(state: AppState, scope: CoroutineScope) {
     val context = LocalContext.current
+    val allFiles = hasAllFilesAccess(context)
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
         if (uri != null) {
-            state.attachFolder(uri)
+            state.attachFolder(uri, scope)
             if (!state.hasFolder) {
-                Toast.makeText(context, "Could not use that folder", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Choose a folder on this device", Toast.LENGTH_SHORT).show()
+            } else if (!hasAllFilesAccess(context)) {
+                openAllFilesSettings(context)
             }
         }
     }
@@ -523,9 +532,15 @@ private fun FolderSetup(state: AppState) {
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Text(
-                        text = "Sessions and workspace files",
+                        text = if (state.hasFolder) {
+                            state.workspacePath
+                        } else {
+                            "Sessions and workspace files"
+                        },
                         color = Cs.Muted,
                         style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 if (state.hasFolder) {
@@ -551,6 +566,15 @@ private fun FolderSetup(state: AppState) {
                 Spacer(Modifier.width(6.dp))
                 Text(if (state.hasFolder) "Change folder" else "Choose folder")
             }
+            if (state.hasFolder && !allFiles) {
+                OutlinedButton(
+                    onClick = { openAllFilesSettings(context) },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Allow workspace file access")
+                }
+            }
         }
 
         Spacer(Modifier.height(18.dp))
@@ -560,5 +584,21 @@ private fun FolderSetup(state: AppState) {
             style = MaterialTheme.typography.labelSmall,
             color = Cs.Dim,
         )
+    }
+}
+
+private fun hasAllFilesAccess(context: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+
+private fun openAllFilesSettings(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+    val appSettings = Intent(
+        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+        Uri.parse("package:${context.packageName}"),
+    )
+    runCatching { context.startActivity(appSettings) }.onFailure {
+        runCatching {
+            context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+        }
     }
 }

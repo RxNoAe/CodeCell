@@ -21,6 +21,10 @@ object LocalServer {
     var message: String = ""
         private set
 
+    @Volatile
+    var workspacePath: String = ""
+        private set
+
     private var process: Process? = null
     private val lock = Any()
 
@@ -87,6 +91,7 @@ object LocalServer {
             if (password.isNotBlank()) put("OPENCODE_SERVER_PASSWORD", password)
         }
 
+        workspacePath = workspace.absolutePath
         return try {
             val started = builder.start()
             process = started
@@ -119,6 +124,7 @@ object LocalServer {
     fun stop() = synchronized(lock) {
         process?.destroy()
         process = null
+        workspacePath = ""
         state = State.Stopped
         message = "Stopped"
     }

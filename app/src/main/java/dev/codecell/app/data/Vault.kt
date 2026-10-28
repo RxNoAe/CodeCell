@@ -3,6 +3,8 @@ package dev.codecell.app.data
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,10 +45,38 @@ class Vault(private val context: Context, private val config: AppConfig) {
                     ?: root.createDirectory(NAME)
                     ?: return false
             }
+            val workspace = externalPath(target.uri) ?: return false
             config.treeUri = target.uri.toString()
-            directoryOf("workspace")
+            config.workspacePath = workspace
             true
         }.getOrDefault(false)
+    }
+
+    fun workspacePath(): String? =
+        config.treeUri?.let { runCatching { externalPath(Uri.parse(it)) }.getOrNull() }
+
+    private fun externalPath(tree: Uri): String? {
+        if (tree.authority != "com.android.externalstorage.documents") return null
+        val documentId = runCatching {
+            DocumentsContract.getTreeDocumentId(tree)
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
+        val parts = documentId.split(':', limit = 2)
+        val volume = parts.first().trim()
+        val relative = parts.getOrElse(1) { "" }
+        if (volume.isBlank()) return null
+        val base = when {
+            volume.equals("primary", ignoreCase = true) ->
+                Environment.getExternalStorageDirectory().absolutePath
+
+            volume.equals("home", ignoreCase = true) ->
+                File(
+                    Environment.getExternalStorageDirectory(),
+                    Environment.DIRECTORY_DOCUMENTS,
+                ).absolutePath
+
+            else -> "/storage/$volume"
+        }
+        return runCatching { File(base, relative).canonicalPath }.getOrNull()
     }
 
     fun saveAgents(agents: List<AgentOption>): Boolean {

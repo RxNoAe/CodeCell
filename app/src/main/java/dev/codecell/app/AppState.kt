@@ -2,6 +2,8 @@ package dev.codecell.app
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -108,7 +110,14 @@ class AppState(context: Context) {
     }
 
     fun ensureServer(scope: CoroutineScope) {
-        if (serverPhase == ServerPhase.Starting || serverPhase == ServerPhase.Running) return
+        if (serverPhase == ServerPhase.Starting) return
+        if (serverPhase == ServerPhase.Running) {
+            val embedded = LocalServer.workspacePath
+            if (!LocalServer.isRunning() || embedded == config.workspacePath) return
+            ServerService.stop(appContext)
+            LocalServer.stop()
+            serverPhase = ServerPhase.Stopped
+        }
 
         val password = config.serverPassword
         OpencodeClient.setCredentials("opencode", password)
@@ -124,7 +133,21 @@ class AppState(context: Context) {
                 return@launch
             }
 
+            if (config.treeUri != null &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                !Environment.isExternalStorageManager()
+            ) {
+                serverPhase = ServerPhase.Failed
+                serverStatus = "Allow file access in Settings to use your selected workspace."
+                return@launch
+            }
+
             val workspace = File(config.workspacePath).apply { mkdirs() }
+            if (!workspace.exists()) {
+                serverPhase = ServerPhase.Failed
+                serverStatus = "The selected workspace is not accessible."
+                return@launch
+            }
             workspacePath = workspace.absolutePath
             ServerService.start(appContext, workspace, password, portOf(serverUrl))
 
@@ -186,13 +209,20 @@ class AppState(context: Context) {
         URI(url.trim()).port.takeIf { it > 0 } ?: 4096
     }.getOrDefault(4096)
 
-    fun attachFolder(uri: Uri) {
+    fun attachFolder(uri: Uri, scope: CoroutineScope) {
         val ok = vault.attach(uri)
         hasFolder = vault.hasFolder()
         folderLabel = vault.label()
         config.folderPrompted = true
         folderPrompted = true
-        if (ok) customAgents = vault.loadAgents()
+        if (ok) {
+            workspacePath = config.workspacePath
+            File(workspacePath).mkdirs()
+            customAgents = vault.loadAgents()
+            val canAccess = Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+                Environment.isExternalStorageManager()
+            if (canAccess) restartServer(scope)
+        }
     }
 
     fun markFolderPrompted() {
