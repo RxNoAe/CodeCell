@@ -4,8 +4,15 @@ import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +29,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -49,6 +57,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
@@ -65,26 +74,29 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.codecell.app.AppState
 import dev.codecell.app.ChatMessage
 import dev.codecell.app.R
 import dev.codecell.app.Role
 import dev.codecell.app.data.SessionInfo
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -128,6 +140,7 @@ fun CodeCellApp(state: AppState) {
             scrimColor = Color.Black.copy(alpha = 0.5f),
             drawerContent = {
                 ModalDrawerSheet(
+                    modifier = Modifier.width(312.dp),
                     drawerContainerColor = Cs.Sheet,
                     drawerContentColor = Cs.Text,
                 ) {
@@ -151,7 +164,10 @@ fun CodeCellApp(state: AppState) {
                 }
             },
         ) {
-            Surface(color = Cs.Bg, modifier = Modifier.fillMaxSize()) {
+            Surface(
+                color = Color.Transparent,
+                modifier = Modifier.fillMaxSize().background(Cs.PageGradient),
+            ) {
                 Column(
                     Modifier
                         .fillMaxSize()
@@ -270,13 +286,17 @@ private fun TopBar(
 
 @Composable
 private fun AgentChip(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(50)
     Row(
         modifier = modifier
-            .widthIn(max = 180.dp)
-            .clip(RoundedCornerShape(50))
-            .background(Cs.Input)
+            .widthIn(max = 190.dp)
+            .clip(shape)
+            .background(
+                Brush.verticalGradient(listOf(Color(0xFF1F1F26), Color(0xFF15151A))),
+            )
+            .border(1.dp, Cs.Line, shape)
             .clickable(onClick = onClick)
-            .padding(start = 12.dp, end = 6.dp, top = 7.dp, bottom = 7.dp),
+            .padding(start = 12.dp, end = 7.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -285,19 +305,20 @@ private fun AgentChip(label: String, onClick: () -> Unit, modifier: Modifier = M
             tint = Cs.Muted,
             modifier = Modifier.size(15.dp),
         )
-        Spacer(Modifier.size(6.dp))
+        Spacer(Modifier.size(7.dp))
         Text(
             text = label,
             color = Cs.Text,
-            fontSize = 12.sp,
+            style = MaterialTheme.typography.labelLarge,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 120.dp),
+            modifier = Modifier.widthIn(max = 124.dp),
         )
+        Spacer(Modifier.size(2.dp))
         Icon(
             Icons.Filled.ExpandMore,
             contentDescription = null,
-            tint = Cs.Muted,
+            tint = Cs.Dim,
             modifier = Modifier.size(16.dp),
         )
     }
@@ -321,41 +342,67 @@ private fun DrawerContent(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 12.dp, top = 8.dp, bottom = 6.dp),
+                .padding(start = 8.dp, top = 12.dp, bottom = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "CodeCell",
-                color = Cs.Text,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-            IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.Close, contentDescription = "Close", tint = Cs.Muted)
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(Brush.verticalGradient(listOf(Color(0xFF23232B), Color(0xFF16161B))))
+                    .border(1.dp, Cs.Line, RoundedCornerShape(13.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.ic_logo),
+                    contentDescription = null,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+            Spacer(Modifier.size(11.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "CodeCell",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Cs.Text,
+                )
+                Text(
+                    text = "opencode client",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Cs.Dim,
+                )
+            }
+            IconButton(onClick = onClose, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Filled.Close, contentDescription = "Close", tint = Cs.Dim)
             }
         }
 
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                .shadow(16.dp, RoundedCornerShape(15.dp), ambientColor = Color.Black, spotColor = Color.Black)
+                .clip(RoundedCornerShape(15.dp))
+                .background(Cs.ButtonGradient)
                 .clickable(onClick = onNewChat)
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 13.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Add, contentDescription = null, tint = Cs.Text, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.size(10.dp))
-            Text("New chat", color = Cs.Text, fontSize = 14.sp)
+            Icon(Icons.Filled.Add, contentDescription = null, tint = Cs.Bg, modifier = Modifier.size(19.dp))
+            Spacer(Modifier.size(9.dp))
+            Text(
+                "New chat",
+                color = Cs.Bg,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f),
+            )
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(22.dp))
         Text(
-            text = "SESSIONS",
+            text = "RECENT",
+            style = MaterialTheme.typography.labelSmall,
             color = Cs.Dim,
-            fontSize = 10.sp,
-            letterSpacing = 1.4.sp,
-            modifier = Modifier.padding(start = 12.dp, bottom = 6.dp),
+            modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
         )
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -373,8 +420,8 @@ private fun DrawerContent(
 
                 state.sessions.isEmpty() -> Text(
                     text = "No sessions yet",
+                    style = MaterialTheme.typography.bodySmall,
                     color = Cs.Dim,
-                    fontSize = 12.sp,
                     modifier = Modifier.padding(start = 12.dp, top = 4.dp),
                 )
 
@@ -390,19 +437,42 @@ private fun DrawerContent(
             }
         }
 
+        Spacer(Modifier.height(6.dp))
+        val footerShape = RoundedCornerShape(14.dp)
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                .clip(footerShape)
+                .background(Cs.Input.copy(alpha = 0.45f))
+                .border(1.dp, Cs.LineSoft, footerShape)
                 .clickable(onClick = onSettings)
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+                .padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Settings, contentDescription = null, tint = Cs.Muted, modifier = Modifier.size(18.dp))
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Cs.SheetTop),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Settings,
+                    contentDescription = null,
+                    tint = Cs.Muted,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
             Spacer(Modifier.size(10.dp))
             Column(Modifier.weight(1f)) {
-                Text("Settings", color = Cs.Text, fontSize = 13.sp)
-                Text(state.folderLabel, color = Cs.Dim, fontSize = 10.sp, maxLines = 1)
+                Text("Settings", color = Cs.Text, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = if (state.hasFolder) state.folderLabel else "Choose a CodeCell folder",
+                    color = Cs.Dim,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
@@ -413,43 +483,85 @@ private fun SessionRow(session: SessionInfo, selected: Boolean, onClick: () -> U
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .padding(vertical = 1.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(if (selected) Cs.Input else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 10.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = session.title,
-            color = if (selected) Cs.Text else Color(0xFFC2C2C8),
-            fontSize = 13.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Box(
+            Modifier
+                .size(width = 3.dp, height = 18.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(if (selected) Cs.Text else Color.Transparent),
         )
+        Spacer(Modifier.size(9.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = session.title,
+                color = if (selected) Cs.Text else Cs.Body,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (session.updated > 0) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = relativeTime(session.updated),
+                    color = Cs.Dim,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun EmptyState(name: String) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(bottom = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Image(
-            painter = painterResource(R.drawable.ic_logo),
-            contentDescription = null,
-            modifier = Modifier.size(46.dp),
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .size(300.dp)
+                .background(
+                    Brush.radialGradient(listOf(Cs.Glow, Color.Transparent)),
+                    CircleShape,
+                ),
         )
-        Spacer(Modifier.height(18.dp))
-        Text(
-            text = "${greeting()}, ${name.ifBlank { "there" }}",
-            color = Cs.Text,
-            fontSize = 19.sp,
-            fontWeight = FontWeight.Medium,
-        )
+        Column(
+            Modifier.padding(bottom = 36.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier
+                    .size(68.dp)
+                    .shadow(24.dp, RoundedCornerShape(24.dp), ambientColor = Color.Black, spotColor = Color.Black)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(
+                        Brush.verticalGradient(listOf(Color(0xFF202027), Color(0xFF141419))),
+                    )
+                    .border(1.dp, Cs.Line, RoundedCornerShape(24.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.ic_logo),
+                    contentDescription = null,
+                    modifier = Modifier.size(36.dp),
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+            Text(
+                text = "${greeting()}, ${name.ifBlank { "there" }}",
+                style = MaterialTheme.typography.headlineMedium,
+                color = Cs.Text,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "What are we building today?",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Cs.Muted,
+            )
+        }
     }
 }
 
@@ -483,26 +595,26 @@ private fun MessageRow(message: ChatMessage) {
     val clipboard = LocalClipboardManager.current
 
     if (message.role == Role.User) {
+        val shape = RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Text(
                 text = message.text,
                 color = Cs.Text,
-                fontSize = 14.sp,
-                lineHeight = 20.sp,
+                style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier
-                    .widthIn(max = 300.dp)
-                    .clip(RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp))
-                    .background(Cs.Bubble)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .widthIn(max = 304.dp)
+                    .clip(shape)
+                    .background(Cs.BubbleGradient)
+                    .border(1.dp, Color(0xFF3A3A44), shape)
+                    .padding(horizontal = 15.dp, vertical = 11.dp),
             )
         }
     } else {
         Column(Modifier.fillMaxWidth()) {
             Text(
                 text = message.text,
-                color = if (message.isError) Cs.Error else Color(0xFFC9C9CE),
-                fontSize = 14.sp,
-                lineHeight = 21.sp,
+                color = if (message.isError) Cs.Error else Cs.Body,
+                style = MaterialTheme.typography.bodyLarge,
             )
             if (!message.isError) {
                 Spacer(Modifier.height(4.dp))
@@ -552,14 +664,32 @@ private fun StaticIcon(icon: ImageVector) {
 
 @Composable
 private fun TypingRow() {
+    val transition = rememberInfiniteTransition(label = "typing")
     Row(verticalAlignment = Alignment.CenterVertically) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(14.dp),
-            strokeWidth = 1.5.dp,
+        Text(
+            "Thinking",
             color = Cs.Muted,
+            style = MaterialTheme.typography.bodyMedium,
         )
-        Spacer(Modifier.size(8.dp))
-        Text("Thinking...", color = Cs.Muted, fontSize = 14.sp)
+        Spacer(Modifier.size(9.dp))
+        repeat(3) { index ->
+            val alpha by transition.animateFloat(
+                initialValue = 0.2f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 520, delayMillis = index * 150),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+                label = "dot$index",
+            )
+            Box(
+                Modifier
+                    .padding(horizontal = 1.5.dp)
+                    .size(4.dp)
+                    .clip(CircleShape)
+                    .background(Cs.Muted.copy(alpha = alpha)),
+            )
+        }
     }
 }
 
@@ -573,13 +703,17 @@ private fun Composer(
     onNewChat: () -> Unit,
 ) {
     val canSend = value.isNotBlank()
+    val sendScale by animateFloatAsState(if (canSend) 1f else 0.9f, label = "sendScale")
+    val shape = RoundedCornerShape(30.dp)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 14.dp, vertical = 10.dp)
-            .clip(RoundedCornerShape(28.dp))
-            .background(Cs.Input)
+            .shadow(28.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
+            .clip(shape)
+            .background(Cs.ComposerGradient)
+            .border(1.dp, Cs.Line, shape)
             .padding(start = 4.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -587,15 +721,15 @@ private fun Composer(
             Icon(
                 Icons.Filled.Add,
                 contentDescription = "New chat",
-                tint = Cs.Text,
-                modifier = Modifier.size(22.dp),
+                tint = Cs.Muted,
+                modifier = Modifier.size(21.dp),
             )
         }
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier.weight(1f).padding(vertical = 14.dp),
-            textStyle = TextStyle(color = Cs.Text, fontSize = 15.sp, lineHeight = 20.sp),
+            modifier = Modifier.weight(1f).padding(vertical = 15.dp),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = Cs.Text),
             maxLines = 5,
             cursorBrush = SolidColor(Cs.Text),
             keyboardOptions = KeyboardOptions(
@@ -606,7 +740,11 @@ private fun Composer(
             decorationBox = { innerTextField ->
                 Box {
                     if (value.isEmpty()) {
-                        Text("How can I help you today?", color = Cs.Muted, fontSize = 15.sp)
+                        Text(
+                            "Message CodeCell...",
+                            color = Cs.Dim,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
                     }
                     innerTextField()
                 }
@@ -623,12 +761,29 @@ private fun Composer(
         }
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(38.dp)
+                .graphicsLayer {
+                    scaleX = sendScale
+                    scaleY = sendScale
+                }
+                .shadow(
+                    elevation = if (canSend) 14.dp else 0.dp,
+                    shape = CircleShape,
+                    ambientColor = Color.White.copy(alpha = 0.2f),
+                    spotColor = Color.White.copy(alpha = 0.2f),
+                )
                 .clip(CircleShape)
-                .background(if (canSend) Cs.Text else Color(0xFF34343A)),
+                .background(
+                    brush = if (canSend) {
+                        Cs.ButtonGradient
+                    } else {
+                        Brush.verticalGradient(listOf(Color(0xFF2A2A31), Color(0xFF232329)))
+                    },
+                )
+                .border(1.dp, if (canSend) Color.Transparent else Cs.Line, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            IconButton(onClick = onSend, enabled = canSend, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = onSend, enabled = canSend, modifier = Modifier.size(38.dp)) {
                 Icon(
                     Icons.Filled.ArrowUpward,
                     contentDescription = "Send",
@@ -642,18 +797,20 @@ private fun Composer(
 
 @Composable
 private fun ModelChip(label: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(50)
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(Cs.Bg.copy(alpha = 0.4f))
+            .clip(shape)
+            .background(Color(0xFF101014))
+            .border(1.dp, Cs.LineSoft, shape)
             .clickable(onClick = onClick)
             .padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
-            color = Cs.Text,
-            fontSize = 12.sp,
+            color = Cs.Body,
+            style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.widthIn(max = 82.dp),
@@ -664,6 +821,21 @@ private fun ModelChip(label: String, onClick: () -> Unit) {
             tint = Cs.Muted,
             modifier = Modifier.size(16.dp),
         )
+    }
+}
+
+private fun relativeTime(updated: Long): String {
+    val diff = System.currentTimeMillis() - updated
+    if (diff < 60_000) return "Just now"
+    val minutes = diff / 60_000
+    if (minutes < 60) return "${minutes}m ago"
+    val hours = minutes / 60
+    if (hours < 24) return "${hours}h ago"
+    val days = hours / 24
+    return when {
+        days == 1L -> "Yesterday"
+        days < 7 -> "${days}d ago"
+        else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(updated))
     }
 }
 

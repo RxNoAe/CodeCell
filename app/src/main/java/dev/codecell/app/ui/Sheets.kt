@@ -1,5 +1,7 @@
 package dev.codecell.app.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +25,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -40,10 +43,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.codecell.app.AppState
 import dev.codecell.app.data.AgentOption
 import dev.codecell.app.data.ModelOption
@@ -71,6 +73,8 @@ fun SettingsSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = Cs.Sheet,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = { SheetHandle() },
     ) {
         Column(
             Modifier
@@ -79,14 +83,13 @@ fun SettingsSheet(
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("Settings", color = Cs.Text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text("Settings", style = MaterialTheme.typography.titleLarge, color = Cs.Text)
             Text(
                 "CodeCell talks to an opencode server. Start one with " +
                     "`opencode serve --hostname 0.0.0.0 --port 4096` " +
                     "and use this device's network address.",
+                style = MaterialTheme.typography.bodySmall,
                 color = Cs.Muted,
-                fontSize = 12.sp,
-                lineHeight = 17.sp,
             )
             OutlinedTextField(
                 value = url,
@@ -105,32 +108,48 @@ fun SettingsSheet(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Text("STORAGE", color = Cs.Dim, fontSize = 10.sp, letterSpacing = 1.3.sp)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "Folder",
-                        color = Cs.Text,
-                        fontSize = 13.sp,
-                    )
-                    Text(
-                        state.folderLabel,
-                        color = Cs.Muted,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                OutlinedButton(onClick = onChooseFolder) {
-                    Text(if (state.hasFolder) "Change" else "Choose")
-                }
-            }
             Text(
-                "Sessions and custom agents are saved in the CodeCell folder on shared storage.",
+                "STORAGE",
+                style = MaterialTheme.typography.labelSmall,
                 color = Cs.Dim,
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
             )
+            val cardShape = RoundedCornerShape(16.dp)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(cardShape)
+                    .background(Cs.Input.copy(alpha = 0.45f))
+                    .border(1.dp, Cs.LineSoft, cardShape)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Folder", style = MaterialTheme.typography.titleSmall, color = Cs.Text)
+                        Text(
+                            state.folderLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Cs.Muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onChooseFolder,
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text(
+                            if (state.hasFolder) "Change" else "Choose",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                }
+                Text(
+                    "Sessions and custom agents are saved in the CodeCell folder on shared storage.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Cs.Dim,
+                )
+            }
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -150,6 +169,7 @@ fun SettingsSheet(
                         }
                     },
                     enabled = !testing,
+                    shape = RoundedCornerShape(12.dp),
                 ) {
                     Text(if (testing) "Testing..." else "Test")
                 }
@@ -157,7 +177,7 @@ fun SettingsSheet(
                     Text(
                         text = it,
                         color = if (it.startsWith("Connected")) Cs.Text else Cs.Error,
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -167,13 +187,14 @@ fun SettingsSheet(
                     state.saveSettings(url, name)
                     onDismiss()
                 },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Cs.Text,
                     contentColor = Cs.Bg,
                 ),
             ) {
-                Text("Save")
+                Text("Save", style = MaterialTheme.typography.titleSmall)
             }
         }
     }
@@ -192,6 +213,8 @@ fun AgentSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = Cs.Sheet,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = { SheetHandle() },
     ) {
         Column(
             Modifier
@@ -203,12 +226,11 @@ fun AgentSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "Agent",
+                    style = MaterialTheme.typography.titleLarge,
                     color = Cs.Text,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onAddCustom) {
+                TextButton(onClick = onAddCustom, shape = RoundedCornerShape(10.dp)) {
                     Icon(
                         Icons.Filled.Add,
                         contentDescription = null,
@@ -216,12 +238,12 @@ fun AgentSheet(
                         modifier = Modifier.size(16.dp),
                     )
                     Spacer(Modifier.size(4.dp))
-                    Text("Custom", color = Cs.Muted, fontSize = 13.sp)
+                    Text("Custom", color = Cs.Muted, style = MaterialTheme.typography.labelLarge)
                 }
             }
 
             LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                items(state.agentOptions(), key = { it.name }) { agent ->
+                items(state.agentOptions(), key = { "${it.name}-${it.isCustom}" }) { agent ->
                     AgentRow(
                         agent = agent,
                         selected = state.agentLabel == agent.name,
@@ -241,9 +263,12 @@ private fun AgentRow(agent: AgentOption, selected: Boolean, onClick: () -> Unit)
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .padding(vertical = 1.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) Cs.Input else Color.Transparent)
+            .border(1.dp, if (selected) Cs.LineSoft else Color.Transparent, RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
+            .padding(horizontal = 13.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -251,7 +276,7 @@ private fun AgentRow(agent: AgentOption, selected: Boolean, onClick: () -> Unit)
                 Text(
                     text = agent.name,
                     color = Cs.Text,
-                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -260,15 +285,15 @@ private fun AgentRow(agent: AgentOption, selected: Boolean, onClick: () -> Unit)
                     Text(
                         text = "CUSTOM",
                         color = Cs.Dim,
-                        fontSize = 9.sp,
-                        letterSpacing = 1.sp,
+                        style = MaterialTheme.typography.labelSmall,
                     )
                 }
             }
+            Spacer(Modifier.height(2.dp))
             Text(
                 text = agent.description,
                 color = Cs.Muted,
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -292,10 +317,11 @@ fun CustomAgentDialog(onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Cs.Sheet,
+        shape = RoundedCornerShape(24.dp),
+        containerColor = Cs.SheetTop,
         titleContentColor = Cs.Text,
         textContentColor = Cs.Muted,
-        title = { Text("Custom agent") },
+        title = { Text("Custom agent", style = MaterialTheme.typography.titleLarge) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -356,6 +382,8 @@ fun ModelsSheet(state: AppState, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = Cs.Sheet,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = { SheetHandle() },
     ) {
         Column(
             Modifier
@@ -367,13 +395,16 @@ fun ModelsSheet(state: AppState, onDismiss: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "Model",
+                    style = MaterialTheme.typography.titleLarge,
                     color = Cs.Text,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = { reload++ }, enabled = !loading) {
-                    Text("Refresh", color = Cs.Muted, fontSize = 13.sp)
+                    Text(
+                        "Refresh",
+                        color = Cs.Muted,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
                 }
             }
 
@@ -390,12 +421,12 @@ fun ModelsSheet(state: AppState, onDismiss: () -> Unit) {
                 }
 
                 error != null -> Column(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
-                    Text(error!!, color = Cs.Error, fontSize = 13.sp)
+                    Text(error!!, color = Cs.Error, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "Check the server URL in Settings and make sure the server is running.",
                         color = Cs.Muted,
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
 
@@ -439,23 +470,27 @@ private fun ModelRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .padding(vertical = 1.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) Cs.Input else Color.Transparent)
+            .border(1.dp, if (selected) Cs.LineSoft else Color.Transparent, RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
+            .padding(horizontal = 13.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text(
                 text = name,
                 color = Cs.Text,
-                fontSize = 14.sp,
+                style = MaterialTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            Spacer(Modifier.height(2.dp))
             Text(
                 text = subtitle,
                 color = Cs.Muted,
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -469,6 +504,17 @@ private fun ModelRow(
             )
         }
     }
+}
+
+@Composable
+private fun SheetHandle() {
+    Box(
+        Modifier
+            .padding(top = 12.dp, bottom = 4.dp)
+            .size(width = 38.dp, height = 4.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(Cs.Line),
+    )
 }
 
 @Composable
