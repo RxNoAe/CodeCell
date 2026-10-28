@@ -91,6 +91,10 @@ class AppState(context: Context) {
 
     init {
         config.serverUrl = AppConfig.DEFAULT_SERVER
+        vault.workspacePath()?.let { selected ->
+            config.workspacePath = selected
+            workspacePath = selected
+        }
     }
 
     val modelLabel: String

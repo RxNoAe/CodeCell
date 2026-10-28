@@ -60,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -84,7 +85,18 @@ fun SettingsSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var name by remember { mutableStateOf(state.userName) }
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            state.attachFolder(uri, scope)
+            if (state.hasFolder && !hasAllFilesAccess(context)) {
+                openAllFilesSettings(context)
+            }
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -177,9 +189,25 @@ fun SettingsSheet(
                     text = "Workspace: ${state.workspacePath}",
                     style = MaterialTheme.typography.bodySmall,
                     color = Cs.Dim,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { folderPicker.launch(null) },
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text("Change folder", style = MaterialTheme.typography.labelLarge)
+                    }
+                    if (state.hasFolder && !hasAllFilesAccess(context)) {
+                        OutlinedButton(
+                            onClick = { openAllFilesSettings(context) },
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("Allow file access", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
             }
             Text(
                 "opencode 1.19.4 is built into this app. No Termux or extra server needed.",

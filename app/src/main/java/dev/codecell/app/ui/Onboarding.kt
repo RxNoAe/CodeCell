@@ -587,10 +587,10 @@ private fun FolderSetup(state: AppState, scope: CoroutineScope) {
     }
 }
 
-private fun hasAllFilesAccess(context: Context): Boolean =
+internal fun hasAllFilesAccess(context: Context): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
 
-private fun openAllFilesSettings(context: Context) {
+internal fun openAllFilesSettings(context: Context) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
     val appSettings = Intent(
         Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
