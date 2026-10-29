@@ -1271,7 +1271,7 @@ private fun ChatMessage.fullText(): String {
     if (parts.isEmpty()) return text
     return parts.joinToString("\n\n") { part ->
         when (part.type) {
-            "text", "reasoning", "step-finish", "retry", "compaction" -> part.text
+            "text", "reasoning", "step-finish", "retry", "compaction", "error" -> part.text
             "tool" -> if (part.tool == "question") {
                 part.questions.joinToString("\n") { it.question }
             } else {
@@ -1737,6 +1737,13 @@ private fun MessageParts(parts: List<ChatPart>, isError: Boolean) {
                     text = part.text,
                     detail = part.detail,
                     color = Cs.Warn,
+                )
+
+                "error" -> NoticeCard(
+                    title = part.title.ifBlank { "ERROR" },
+                    text = part.text,
+                    detail = "",
+                    color = Cs.Error,
                 )
 
                 "file" -> FilePartCard(part.title, part.text)

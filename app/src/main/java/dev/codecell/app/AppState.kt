@@ -600,7 +600,20 @@ class AppState(context: Context) {
                     val live = liveMessageId
                     if (live != null) {
                         messages = messages.map {
-                            if (it.id == live) it.copy(text = message, isError = true) else it
+                            if (it.id == live) {
+                                it.copy(
+                                    text = message,
+                                    isError = true,
+                                    parts = it.parts + ChatPart(
+                                        id = "error-${it.id}",
+                                        type = "error",
+                                        title = "ERROR",
+                                        text = message,
+                                    ),
+                                )
+                            } else {
+                                it
+                            }
                         }
                     } else {
                         append(Role.Assistant, message, isError = true)

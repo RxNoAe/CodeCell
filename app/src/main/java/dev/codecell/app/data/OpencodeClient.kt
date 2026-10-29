@@ -6,12 +6,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.io.InputStreamReader
+import java.net.ConnectException
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
+import java.net.NoRouteToHostException
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
+import java.net.UnknownHostException
 
 class OpencodeException(message: String) : Exception(message)
 
@@ -85,11 +89,22 @@ object OpencodeClient {
         val result = mutableListOf<SessionMessage>()
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
-            val role = item.optJSONObject("info")?.optString("role")
-                ?.takeIf { it == "user" || it == "assistant" } ?: continue
-            val parts = parseParts(item.optJSONArray("parts"))
-            val text = joinText(item.optJSONArray("parts"))
-            val id = item.optJSONObject("info")?.optString("id").orEmpty()
+            val info = item.optJSONObject("info") ?: continue
+            val role = info.optString("role")
+                .takeIf { it == "user" || it == "assistant" } ?: continue
+            val error = info.optJSONObject("error")
+            val errorPart = error?.let {
+                ChatPart(
+                    id = info.optString("id") + ":error",
+                    type = "error",
+                    title = "ERROR",
+                    text = errorMessage(0, it.toString()),
+                )
+            }
+            val parts = parseParts(item.optJSONArray("parts")) + listOfNotNull(errorPart)
+            val joined = joinText(item.optJSONArray("parts"))
+            val text = joined.ifBlank { errorPart?.text.orEmpty() }
+            val id = info.optString("id").orEmpty()
             if (parts.isNotEmpty() || text.isNotBlank()) {
                 result += SessionMessage(role, text, id, parts)
             }
@@ -241,7 +256,7 @@ object OpencodeClient {
         } catch (e: OpencodeException) {
             throw e
         } catch (e: IOException) {
-            throw OpencodeException("Could not load providers. Is the server running?")
+            throw OpencodeException(connectionMessage(e, target, 30_000))
         } finally {
             connection.disconnect()
         }
@@ -403,7 +418,7 @@ object OpencodeClient {
         } catch (e: OpencodeException) {
             throw e
         } catch (e: IOException) {
-            throw OpencodeException("Cannot reach the opencode server. Try restarting it in Settings.")
+            throw OpencodeException(connectionMessage(e, "http://$host:$port", 20_000))
         }
     }
 
@@ -598,13 +613,10 @@ object OpencodeClient {
                 "retry" -> {
                     val attempt = part.optInt("attempt")
                     val error = part.optJSONObject("error")
-                    val message = error?.optJSONObject("data")?.optString("message")
-                        ?.takeIf { it.isNotBlank() }
-                        ?: error?.optString("message").orEmpty()
                     result += ChatPart(
                         id = id,
                         type = type,
-                        text = message,
+                        text = error?.let { errorMessage(0, it.toString()) }.orEmpty(),
                         detail = if (attempt > 0) "Attempt $attempt" else "",
                     )
                 }
@@ -666,18 +678,9 @@ object OpencodeClient {
         if (text.isNotBlank()) return text
 
         val info = root.optJSONObject("info")
-        val error = info?.optJSONObject("error")
+        val error = info?.optJSONObject("error") ?: root.optJSONObject("error")
         if (error != null) {
-            val message = error.optJSONObject("data")?.optString("message")
-                ?.takeIf { it.isNotBlank() }
-                ?: error.optString("message").takeIf { it.isNotBlank() }
-                ?: error.optString("name")
-            if (message.contains("file part media type", ignoreCase = true)) {
-                throw OpencodeException(
-                    "This model can't read that file type. Remove the attachment or pick another model.",
-                )
-            }
-            throw OpencodeException(message.ifBlank { "The model returned an error" })
+            throw OpencodeException(errorMessage(0, error.toString()))
         }
         return "Done."
     }
@@ -818,26 +821,133 @@ object OpencodeClient {
         } catch (e: OpencodeException) {
             throw e
         } catch (e: IOException) {
-            throw OpencodeException(
-                "Cannot reach the opencode server. Try restarting it in Settings.",
-            )
+            throw OpencodeException(connectionMessage(e, target, readTimeoutMs))
         } finally {
             if (activeConnection === connection) activeConnection = null
             connection.disconnect()
         }
     }
 
+    private fun connectionMessage(error: IOException, target: String, timeoutMs: Int): String {
+        val endpoint = endpointOf(target)
+        return when (error) {
+            is SocketTimeoutException ->
+                "opencode did not respond within ${timeoutMs / 1000} seconds. " +
+                    "The server may still be running, but the model request stalled. " +
+                    "If this is a free model, check whether its free usage is exhausted, then retry."
+
+            is ConnectException, is NoRouteToHostException ->
+                "Cannot connect to opencode at $endpoint. The local server is not running. " +
+                    "Restart it in Settings."
+
+            is UnknownHostException ->
+                "Cannot resolve the opencode server address '$endpoint'. Check the server URL in Settings."
+
+            else -> {
+                val detail = error.message?.takeIf { it.isNotBlank() }
+                    ?: error.javaClass.simpleName
+                "Lost connection to opencode at $endpoint: $detail. " +
+                    "Restart the server in Settings if this continues."
+            }
+        }
+    }
+
+    private fun endpointOf(target: String): String = runCatching {
+        val uri = URI(target)
+        val port = if (uri.port > 0) ":${uri.port}" else ""
+        "${uri.host}$port"
+    }.getOrDefault(target)
+
+    private fun firstText(vararg values: String?): String? =
+        values.firstOrNull { !it.isNullOrBlank() && it != "null" }?.trim()
+
+    private fun nestedErrorText(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        val body = runCatching { JSONObject(raw) }.getOrNull() ?: return null
+        val error = body.optJSONObject("error")
+        return firstText(
+            error?.optString("message"),
+            body.optString("message"),
+            error?.optString("detail"),
+        )
+    }
+
     private fun errorMessage(code: Int, raw: String): String {
         if (raw.contains("file part media type", ignoreCase = true)) {
             return "This model can't read that file type. Remove the attachment or pick another model."
         }
-        val fallback = if (raw.isBlank()) "HTTP $code" else raw.take(300)
-        val parsed = runCatching { JSONObject(raw) }.getOrNull() ?: return fallback
-        val error = parsed.optJSONObject("error")
-        val message = error?.optJSONObject("data")?.optString("message")
-            ?.takeIf { it.isNotBlank() }
-            ?: error?.optString("message")?.takeIf { it.isNotBlank() }
-            ?: parsed.optString("message").takeIf { it.isNotBlank() }
-        return message?.let { "HTTP $code: $it" } ?: fallback
+
+        val parsed = runCatching { JSONObject(raw) }.getOrNull()
+        val error = parsed?.optJSONObject("error")
+        val data = parsed?.optJSONObject("data") ?: error?.optJSONObject("data")
+        val name = firstText(parsed?.optString("name"), error?.optString("name")).orEmpty()
+        val responseBody = firstText(
+            data?.optString("responseBody"),
+            error?.optString("responseBody"),
+        ).orEmpty()
+        val providerMessage = nestedErrorText(responseBody)
+        val message = firstText(
+            data?.optString("message"),
+            error?.optString("message"),
+            providerMessage,
+            parsed?.optString("message"),
+            data?.optString("detail"),
+            parsed?.optString("error"),
+        ) ?: raw.take(500).ifBlank { "Unknown error" }
+        val ref = firstText(data?.optString("ref"), error?.optString("ref")).orEmpty()
+        val statusCode = data?.optInt("statusCode", 0) ?: 0
+        val effectiveCode = if (code > 0) code else statusCode
+        val signal = listOf(name, message, raw, responseBody).joinToString(" ").lowercase()
+
+        val label = when {
+            signal.contains("file part media type") ->
+                "This model can't read that file type"
+
+            signal.contains("context_length_exceeded") ||
+                signal.contains("context window") ||
+                signal.contains("too many tokens") ||
+                signal.contains("context overflow") ->
+                "Context window exceeded"
+
+            signal.contains("insufficient_quota") ||
+                signal.contains("free usage") ||
+                signal.contains("usage limit") ||
+                signal.contains("quota") ||
+                signal.contains("credit balance") ||
+                signal.contains("out of credits") ||
+                signal.contains("billing") ||
+                effectiveCode == 402 ->
+                "Free usage exhausted or quota reached"
+
+            signal.contains("rate limit") ||
+                signal.contains("too many requests") ||
+                signal.contains("retry after") ||
+                effectiveCode == 429 ->
+                "Rate limit reached. If this is a free model, its free usage may be exhausted; wait and retry"
+
+            effectiveCode == 401 || effectiveCode == 403 ||
+                name.contains("auth", ignoreCase = true) ||
+                signal.contains("invalid api key") ||
+                signal.contains("unauthorized") ||
+                signal.contains("forbidden") ->
+                "Provider authentication failed. Check the API key in Settings"
+
+            signal.contains("model not found") ||
+                signal.contains("provider model not found") ||
+                signal.contains("no such model") ->
+                "Model not found. Pick another model"
+
+            effectiveCode >= 500 || name == "UnknownError" ->
+                "opencode server error"
+
+            else -> "Request failed"
+        }
+
+        val detail = message.trim().take(500)
+        val suffix = buildString {
+            if (ref.isNotBlank()) append(" (ref $ref)")
+            if (effectiveCode > 0) append(" (HTTP $effectiveCode)")
+        }
+        return if (detail.isBlank()) label + suffix else "$label: $detail$suffix"
     }
 }
