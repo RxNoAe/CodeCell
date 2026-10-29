@@ -1791,11 +1791,14 @@ private fun ToolCard(part: ChatPart) {
     val snippet = toolSnippet(part)
     val code = toolCode(part)
     val showCode = code.isNotBlank() && snippet != code
+    val running = part.status == "running" || part.status == "pending"
+    val liveShell = running && (part.tool == "bash" || part.tool == "shell")
     val hasMore = showCode ||
         part.output.isNotBlank() ||
         part.error.isNotBlank() ||
+        liveShell ||
         (part.detail.isNotBlank() && part.detail != "{}")
-    var expanded by remember(part.id, part.status) { mutableStateOf(false) }
+    var expanded by remember(part.id) { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val copyText = listOf(code, part.output, part.error)
         .filter { it.isNotBlank() }
@@ -1866,11 +1869,17 @@ private fun ToolCard(part: ChatPart) {
                 SectionLabel("ERROR")
                 ExpandableCode(part.error, Cs.Error, maxLines = 8)
             }
-            if (part.output.isNotBlank()) {
+            if (part.tool == "bash" || part.tool == "shell") {
+                if (part.output.isNotBlank() || running) {
+                    LiveOutputSection(part, accent)
+                }
+            } else if (part.output.isNotBlank()) {
                 SectionLabel("OUTPUT")
                 ExpandableCode(part.output, Cs.Dim, maxLines = 10)
             }
-            if (part.detail.isNotBlank() && part.detail != "{}") {
+            if (part.detail.isNotBlank() && part.detail != "{}" &&
+                part.tool != "bash" && part.tool != "shell"
+            ) {
                 SectionLabel("DETAILS")
                 ExpandableCode(part.detail, Cs.Dim, maxLines = 6)
             }
@@ -1996,6 +2005,70 @@ private fun QuestionToolCard(part: ChatPart) {
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiveOutputSection(part: ChatPart, accent: Color) {
+    val running = part.status == "running" || part.status == "pending"
+    val text = part.output
+    val lines = if (text.isBlank()) 0 else text.count { it == '\n' } + 1
+    val scroll = rememberScrollState()
+    LaunchedEffect(text, running) {
+        if (running && text.isNotBlank()) {
+            delay(16)
+            scroll.scrollTo(scroll.maxValue)
+        }
+    }
+    SectionLabel(if (running) "LIVE OUTPUT" else "OUTPUT")
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (running) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(10.dp),
+                    color = accent,
+                    strokeWidth = 1.5.dp,
+                )
+                Spacer(Modifier.width(5.dp))
+            }
+            Text(
+                text = if (running) {
+                    if (lines > 0) "streaming · $lines lines" else "starting"
+                } else {
+                    if (lines == 1) "1 line" else "$lines lines"
+                },
+                color = if (running) accent else Cs.Dim,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        Spacer(Modifier.height(5.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 72.dp, max = 220.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Cs.Bg.copy(alpha = 0.55f))
+                .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(10.dp))
+                .verticalScroll(scroll)
+                .padding(10.dp),
+        ) {
+            Text(
+                text = text.ifBlank {
+                    if (running) "Waiting for output..." else "(no output)"
+                },
+                color = if (text.isBlank()) Cs.Dim else Cs.Body,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 17.sp,
+                ),
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }

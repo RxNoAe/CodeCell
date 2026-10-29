@@ -516,7 +516,13 @@ class AppState(context: Context) {
                                     .filterNot { it.sessionID == activeSession } + mine
                             }
                         }
-                        delay(700)
+                        val toolRunning = loaded?.any { item ->
+                            item.parts.any { part ->
+                                part.type == "tool" &&
+                                    (part.status == "running" || part.status == "pending")
+                            }
+                        } == true
+                        delay(if (toolRunning) 250 else 700)
                     }
                 }
                 activePollJob = pollJob
