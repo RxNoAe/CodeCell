@@ -39,6 +39,7 @@ data class ChatPart(
     val progressLabel: String = "",
     val questions: List<QuestionInfo> = emptyList(),
     val answers: List<List<String>> = emptyList(),
+    val preview: ByteArray? = null,
 )
 
 data class QuestionOption(
@@ -72,4 +73,5 @@ data class Attachment(
     val name: String,
     val mime: String,
     val bytes: ByteArray,
+    val preview: ByteArray? = null,
 )

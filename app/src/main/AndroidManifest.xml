@@ -9,6 +9,10 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <permission
+        android:name="dev.codecell.app.permission.NOTIFY"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="dev.codecell.app.permission.NOTIFY" />
 
     <application
         android:allowBackup="true"
@@ -28,6 +32,15 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Embedded opencode agent server" />
         </service>
+
+        <receiver
+            android:name=".service.NotifyReceiver"
+            android:exported="true"
+            android:permission="dev.codecell.app.permission.NOTIFY">
+            <intent-filter>
+                <action android:name="dev.codecell.app.NOTIFY" />
+            </intent-filter>
+        </receiver>
 
         <activity
             android:name=".MainActivity"

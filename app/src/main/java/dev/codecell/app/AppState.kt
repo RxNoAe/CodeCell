@@ -41,6 +41,7 @@ data class ChatMessage(
     val isError: Boolean = false,
     val serverId: String? = null,
     val parts: List<ChatPart> = emptyList(),
+    val queued: Boolean = false,
 )
 
 class AppState(context: Context) {
@@ -65,6 +66,8 @@ class AppState(context: Context) {
     var sending by mutableStateOf(false)
     var loadingHistory by mutableStateOf(false)
     var liveMessageId by mutableStateOf<Long?>(null)
+        private set
+    var revertMessageID by mutableStateOf<String?>(null)
         private set
 
     var folderLabel by mutableStateOf(vault.label())
@@ -270,6 +273,8 @@ class AppState(context: Context) {
         sessionTitle = "New chat"
         messages = emptyList()
         liveMessageId = null
+        revertMessageID = null
+        queuedPrompts.clear()
         pendingQuestions = emptyList()
         seenAssistantIds.clear()
     }
@@ -308,6 +313,8 @@ class AppState(context: Context) {
         sessionTitle = target.title
         messages = emptyList()
         liveMessageId = null
+        revertMessageID = target.revertMessageID
+        queuedPrompts.clear()
         seenAssistantIds.clear()
         loadingHistory = true
         scope.launch {
@@ -316,7 +323,7 @@ class AppState(context: Context) {
                     OpencodeClient.loadMessages(serverUrl, target.id)
                 }
                 rememberAssistantIds(loaded)
-                messages = loaded.map { message ->
+                messages = loaded.visibleUpTo(revertMessageID).map { message ->
                     ChatMessage(
                         id = nextId++,
                         role = if (message.role == "assistant") Role.Assistant else Role.User,
@@ -381,7 +388,7 @@ class AppState(context: Context) {
                 }
             }.onSuccess { loaded ->
                 rememberAssistantIds(loaded)
-                messages = loaded.map { item ->
+                messages = loaded.visibleUpTo(revertMessageID).map { item ->
                     ChatMessage(
                         id = nextId++,
                         role = if (item.role == "assistant") Role.Assistant else Role.User,
@@ -394,10 +401,34 @@ class AppState(context: Context) {
         }
     }
 
+    private data class QueuedPrompt(
+        val id: Long,
+        val text: String,
+        val attachments: List<Attachment>,
+    )
+
+    private val queuedPrompts = ArrayDeque<QueuedPrompt>()
+
     fun send(text: String, attachments: List<Attachment> = emptyList(), scope: CoroutineScope) {
         val content = text.trim()
-        if ((content.isEmpty() && attachments.isEmpty()) || sending) return
+        if (content.isEmpty() && attachments.isEmpty()) return
+        if (sending) {
+            val parts = attachments.map {
+                ChatPart(type = "file", title = it.name, text = it.mime, preview = it.preview)
+            }
+            val queued = append(Role.User, content, parts = parts, queued = true)
+            queuedPrompts.addLast(QueuedPrompt(queued.id, content, attachments))
+            return
+        }
+        startSend(content, attachments, scope, queuedID = null)
+    }
 
+    private fun startSend(
+        content: String,
+        attachments: List<Attachment>,
+        scope: CoroutineScope,
+        queuedID: Long?,
+    ) {
         val isNew = sessionId == null
         val title = content.lineSequence().firstOrNull()?.trim()?.take(60)
             ?.takeIf { it.isNotBlank() }
@@ -405,13 +436,20 @@ class AppState(context: Context) {
             ?: "New chat"
         val display = content
         val userParts = attachments.map {
-            ChatPart(type = "file", title = it.name, text = it.mime)
+            ChatPart(type = "file", title = it.name, text = it.mime, preview = it.preview)
         }
 
         val baselineAssistantIds = seenAssistantIds + messages
             .filter { it.role == Role.Assistant }
             .mapNotNull { it.serverId }
-        val userMessage = append(Role.User, display, parts = userParts)
+        val userMessage = if (queuedID == null) {
+            append(Role.User, display, parts = userParts)
+        } else {
+            messages = messages.map {
+                if (it.id == queuedID) it.copy(queued = false) else it
+            }
+            messages.firstOrNull { it.id == queuedID } ?: return
+        }
         sending = true
         userStopped = false
         var sessionForCleanup: String? = null
@@ -454,7 +492,7 @@ class AppState(context: Context) {
                                             serverId = serverId,
                                             parts = parts,
                                         )
-                                        messages = messages + message
+                                        appendMessage(message)
                                         liveMessageId = message.id
                                     } else {
                                         messages = messages.map {
@@ -496,6 +534,7 @@ class AppState(context: Context) {
                         attachments = attachments,
                     )
                 }
+                revertMessageID = null
                 markRunning()
                 pollJob?.cancelAndJoin()
                 pollJob = null
@@ -571,10 +610,21 @@ class AppState(context: Context) {
                 sessionForCleanup?.let { active ->
                     pendingQuestions = pendingQuestions.filterNot { it.sessionID == active }
                 }
+                drainQueue(scope)
             }
         }
 
         if (isNew) sessionTitle = title
+    }
+
+    private fun drainQueue(scope: CoroutineScope) {
+        if (sending) return
+        while (true) {
+            val next = queuedPrompts.removeFirstOrNull() ?: return
+            if (messages.none { it.id == next.id }) continue
+            startSend(next.text, next.attachments, scope, next.id)
+            return
+        }
     }
 
     fun stop(scope: CoroutineScope) {
@@ -673,7 +723,7 @@ class AppState(context: Context) {
 
     private fun persistSession(id: String, scope: CoroutineScope) {
         if (!hasFolder) return
-        val snapshot = messages.map {
+        val snapshot = messages.filterNot { it.queued }.map {
             SessionMessage(
                 role = if (it.role == Role.User) "user" else "assistant",
                 text = it.text,
@@ -698,6 +748,7 @@ class AppState(context: Context) {
         isError: Boolean = false,
         serverId: String? = null,
         parts: List<ChatPart> = emptyList(),
+        queued: Boolean = false,
     ): ChatMessage {
         val message = ChatMessage(
             id = nextId++,
@@ -706,9 +757,23 @@ class AppState(context: Context) {
             isError = isError,
             serverId = serverId,
             parts = parts,
+            queued = queued,
         )
-        messages = messages + message
+        appendMessage(message)
         return message
+    }
+
+    private fun appendMessage(message: ChatMessage) {
+        val queueIndex = if (message.role == Role.Assistant) {
+            messages.indexOfFirst { it.queued }
+        } else {
+            -1
+        }
+        messages = if (queueIndex >= 0) {
+            messages.toMutableList().apply { add(queueIndex, message) }
+        } else {
+            messages + message
+        }
     }
 
     fun forkFrom(message: ChatMessage, scope: CoroutineScope) {
@@ -735,16 +800,18 @@ class AppState(context: Context) {
         val messageID = message.serverId ?: return
         scope.launch {
             try {
-                withContext(Dispatchers.IO) {
+                val revertedID = withContext(Dispatchers.IO) {
                     OpencodeClient.revertSession(serverUrl, session, messageID)
                 }
+                revertMessageID = revertedID?.takeIf { it.isNotBlank() } ?: messageID
+                queuedPrompts.clear()
                 loadingHistory = true
                 liveMessageId = null
                 val loaded = withContext(Dispatchers.IO) {
                     OpencodeClient.loadMessages(serverUrl, session)
                 }
                 rememberAssistantIds(loaded)
-                messages = loaded.map { item ->
+                messages = loaded.visibleUpTo(revertMessageID).map { item ->
                     ChatMessage(
                         id = nextId++,
                         role = if (item.role == "assistant") Role.Assistant else Role.User,
@@ -761,6 +828,12 @@ class AppState(context: Context) {
                 loadingHistory = false
             }
         }
+    }
+
+    private fun List<SessionMessage>.visibleUpTo(revertID: String?): List<SessionMessage> {
+        if (revertID.isNullOrBlank()) return this
+        val index = indexOfFirst { it.id == revertID }
+        return if (index < 0) this else take(index)
     }
 
     companion object {

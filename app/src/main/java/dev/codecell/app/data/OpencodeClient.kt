@@ -71,7 +71,10 @@ object OpencodeClient {
             val updated = time?.optLong("updated") ?: 0L
             val archived = (time?.optLong("archived") ?: 0L) > 0L
             val pinned = item.optJSONObject("metadata")?.optBoolean("pinned") ?: false
-            result += SessionInfo(id, title, updated, pinned, archived)
+            val revertID = item.optJSONObject("revert")
+                ?.optString("messageID")
+                ?.takeIf { it.isNotBlank() }
+            result += SessionInfo(id, title, updated, pinned, archived, revertID)
         }
         return result
     }
@@ -174,9 +177,14 @@ object OpencodeClient {
         return id
     }
 
-    fun revertSession(baseUrl: String, sessionId: String, messageID: String) {
+    fun revertSession(baseUrl: String, sessionId: String, messageID: String): String? {
         val body = JSONObject().put("messageID", messageID).toString()
-        request("POST", url(baseUrl, "/session/$sessionId/revert"), body)
+        val raw = request("POST", url(baseUrl, "/session/$sessionId/revert"), body)
+        return runCatching {
+            JSONObject(raw).optJSONObject("revert")
+                ?.optString("messageID")
+                ?.takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
     fun listProviders(baseUrl: String): ProviderCatalog {
@@ -602,11 +610,13 @@ object OpencodeClient {
                 }
 
                 "file" -> {
+                    val mime = part.optString("mime")
                     result += ChatPart(
                         id = id,
                         type = type,
                         title = part.optString("filename").ifBlank { "File" },
-                        text = part.optString("mime"),
+                        text = mime,
+                        preview = ImagePreview.fromDataUrl(part.optString("url"), mime, id),
                     )
                 }
 

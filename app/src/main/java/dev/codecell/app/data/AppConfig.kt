@@ -28,6 +28,7 @@ data class SessionInfo(
     val updated: Long,
     val pinned: Boolean = false,
     val archived: Boolean = false,
+    val revertMessageID: String? = null,
 )
 
 data class SessionMessage(

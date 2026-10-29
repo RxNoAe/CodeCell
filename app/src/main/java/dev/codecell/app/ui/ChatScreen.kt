@@ -3,6 +3,7 @@ package dev.codecell.app.ui
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -108,6 +109,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -118,9 +120,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -142,6 +147,7 @@ import dev.codecell.app.Role
 import dev.codecell.app.ServerPhase
 import dev.codecell.app.data.Attachment
 import dev.codecell.app.data.ChatPart
+import dev.codecell.app.data.ImagePreview
 import dev.codecell.app.data.QuestionRequest
 import dev.codecell.app.data.SessionInfo
 import org.json.JSONObject
@@ -365,7 +371,7 @@ fun CodeCellApp(state: AppState) {
                         value = draft,
                         onValueChange = { draft = it },
                         onSend = {
-                            if ((draft.isNotBlank() || attachments.isNotEmpty()) && !state.sending) {
+                            if (draft.isNotBlank() || attachments.isNotEmpty()) {
                                 val text = draft
                                 val files = attachments
                                 draft = ""
@@ -1172,23 +1178,42 @@ private fun MessageRow(
 
     if (message.role == Role.User) {
         val shape = RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp)
+        val files = message.parts.filter { it.type == "file" }
         Box(Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Text(
-                    text = message.userTextWithFiles(),
-                    color = Cs.Text,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier
-                        .widthIn(max = 304.dp)
-                        .clip(shape)
-                        .background(Cs.BubbleGradient)
-                        .border(1.dp, Color(0xFF3A3A44), shape)
-                        .combinedClickable(
-                            onClick = {},
-                            onLongClick = { menu = true },
-                        )
-                        .padding(horizontal = 15.dp, vertical = 11.dp),
-                )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = { menu = true },
+                    ),
+                horizontalAlignment = Alignment.End,
+            ) {
+                if (message.queued) {
+                    Text(
+                        text = "Queued",
+                        color = Cs.Dim,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(end = 6.dp, bottom = 4.dp),
+                    )
+                }
+                if (files.isNotEmpty()) {
+                    UserAttachments(files)
+                }
+                if (message.text.isNotBlank()) {
+                    if (files.isNotEmpty()) Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = message.text,
+                        color = Cs.Text,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier
+                            .widthIn(max = 304.dp)
+                            .clip(shape)
+                            .background(Cs.BubbleGradient)
+                            .border(1.dp, Color(0xFF3A3A44), shape)
+                            .padding(horizontal = 15.dp, vertical = 11.dp),
+                    )
+                }
             }
             MessageActionsMenu(
                 expanded = menu,
@@ -2232,6 +2257,97 @@ private fun NoticeCard(
 }
 
 @Composable
+private fun UserAttachments(parts: List<ChatPart>) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        parts.forEach { part ->
+            UserAttachmentCard(part)
+        }
+    }
+}
+
+@Composable
+private fun UserAttachmentCard(part: ChatPart) {
+    val shape = RoundedCornerShape(18.dp)
+    val isImage = part.text.startsWith("image/", ignoreCase = true)
+    val preview = part.preview
+    val bitmap by produceState<ImageBitmap?>(
+        initialValue = null,
+        key1 = part.id,
+        key2 = preview,
+    ) {
+        value = preview?.let {
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap()
+                }.getOrNull()
+            }
+        }
+    }
+
+    if (isImage && bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = part.title.ifBlank { "Attached image" },
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .width(248.dp)
+                .height(178.dp)
+                .clip(shape)
+                .border(1.dp, Cs.Line, shape),
+        )
+        return
+    }
+
+    Row(
+        modifier = Modifier
+            .widthIn(min = 170.dp, max = 260.dp)
+            .clip(shape)
+            .background(Cs.Input.copy(alpha = 0.86f))
+            .border(1.dp, Cs.Line, shape)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Cs.ToolNet.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (isImage) Icons.Filled.Image else Icons.Filled.InsertDriveFile,
+                contentDescription = null,
+                tint = Cs.ToolNet,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+        Spacer(Modifier.width(9.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = part.title.ifBlank { if (isImage) "Image" else "File" },
+                color = Cs.Body,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (part.text.isNotBlank()) {
+                Text(
+                    text = part.text,
+                    color = Cs.Dim,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun FilePartCard(name: String, mime: String) {
     val shape = RoundedCornerShape(16.dp)
     Row(
@@ -2475,7 +2591,7 @@ private fun Composer(
                     imeAction = ImeAction.Send,
                     capitalization = KeyboardCapitalization.Sentences,
                 ),
-                keyboardActions = KeyboardActions(onSend = { if (!sending) onSend() }),
+                keyboardActions = KeyboardActions(onSend = { if (canSend) onSend() }),
                 decorationBox = { innerTextField ->
                     Box {
                         if (value.isEmpty()) {
@@ -2491,6 +2607,35 @@ private fun Composer(
             )
             ModelChip(label = modelLabel, onClick = onModels)
             Spacer(Modifier.size(6.dp))
+            if (sending && canSend) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .shadow(
+                            elevation = 10.dp,
+                            shape = CircleShape,
+                            ambientColor = Color.White.copy(alpha = 0.16f),
+                            spotColor = Color.White.copy(alpha = 0.16f),
+                        )
+                        .clip(CircleShape)
+                        .background(Cs.ButtonGradient)
+                        .border(1.dp, Color.Transparent, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    IconButton(
+                        onClick = onSend,
+                        modifier = Modifier.size(38.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowUpward,
+                            contentDescription = "Queue message",
+                            tint = Cs.Bg,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.size(6.dp))
+            }
             Box(
                 modifier = Modifier
                     .size(38.dp)
@@ -2677,5 +2822,6 @@ private fun readAttachment(context: Context, uri: Uri): Attachment {
         name = name,
         mime = mime,
         bytes = bytes,
+        preview = runCatching { ImagePreview.create(bytes, mime) }.getOrNull(),
     )
 }
