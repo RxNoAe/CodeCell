@@ -682,6 +682,7 @@ object OpencodeClient {
             lower.contains("selecting previously") ||
             lower.contains("preparing to unpack") ||
             lower.contains("reading database") ||
+            lower.contains("installing") ||
             lower.contains("fetched")
         val downloading = lower.contains("get:") ||
             lower.contains("downloading")
@@ -695,10 +696,15 @@ object OpencodeClient {
             building -> "Building"
             else -> "Working"
         }
+        val progressLine = lines.asReversed().firstOrNull {
+            percentValue.containsMatchIn(it) &&
+                !it.contains("reading database", ignoreCase = true)
+        }
         val fraction = if (installing) {
             null
         } else {
-            percentValue.find(line)?.groupValues?.get(1)
+            progressLine?.let { percentValue.find(it) }
+                ?.groupValues?.get(1)
                 ?.toFloatOrNull()
                 ?.div(100f)
                 ?.coerceIn(0f, 1f)

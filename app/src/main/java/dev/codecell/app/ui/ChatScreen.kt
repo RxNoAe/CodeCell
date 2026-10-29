@@ -189,14 +189,7 @@ fun CodeCellApp(state: AppState) {
                 runCatching { readAttachment(context, uri) }
             }
             result.onSuccess { attachment ->
-                val total = attachments.sumOf { it.bytes.size.toLong() } + attachment.bytes.size
-                if (attachment.bytes.size > MAX_ATTACHMENT_BYTES) {
-                    Toast.makeText(context, "File is too large (max 12 MB)", Toast.LENGTH_SHORT).show()
-                } else if (total > MAX_TOTAL_ATTACHMENT_BYTES) {
-                    Toast.makeText(context, "Attachments are too large together (max 25 MB)", Toast.LENGTH_SHORT).show()
-                } else {
-                    attachments = attachments + attachment
-                }
+                attachments = attachments + attachment
             }.onFailure {
                 Toast.makeText(context, it.message ?: "Could not open file", Toast.LENGTH_SHORT).show()
             }
@@ -2017,44 +2010,37 @@ private fun ToolStatus(part: ChatPart, accent: Color) {
 
 @Composable
 private fun ToolProgressStatus(part: ChatPart, accent: Color) {
-    val fraction = part.progress
-    val animated by animateFloatAsState(
-        targetValue = fraction ?: 0f,
-        label = "toolProgress",
-    )
-    val pulse = rememberInfiniteTransition(label = "toolProgressPulse")
-    val pulseFraction by pulse.animateFloat(
-        initialValue = 0.15f,
-        targetValue = 0.85f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "toolProgressPulseValue",
-    )
+    val fraction = part.progress?.coerceIn(0f, 1f)
+    val value = fraction ?: 0f
+    val animated by animateFloatAsState(targetValue = value, label = "toolProgress")
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = if (fraction != null) {
-                "${(fraction * 100).toInt()}%"
-            } else {
-                part.progressLabel.ifBlank { "Working" }
-            },
-            color = if (fraction != null) accent else Cs.Dim,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-        )
-        Spacer(Modifier.width(5.dp))
-        Box(
-            Modifier
-                .width(46.dp)
-                .height(4.dp)
-                .clip(CircleShape)
-                .background(accent.copy(alpha = 0.18f)),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(
-                        (if (fraction != null) animated else pulseFraction).coerceIn(0f, 1f),
-                    )
-                    .fillMaxHeight()
-                    .background(accent),
+        if (fraction != null) {
+            CircularProgressIndicator(
+                progress = { animated },
+                modifier = Modifier.size(14.dp),
+                color = accent,
+                trackColor = accent.copy(alpha = 0.18f),
+                strokeWidth = 2.dp,
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text = "${(value * 100).toInt()}%",
+                color = accent,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+            )
+        } else {
+            CircularProgressIndicator(
+                modifier = Modifier.size(14.dp),
+                color = accent,
+                strokeWidth = 2.dp,
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text = part.progressLabel.ifBlank { "Working" },
+                color = Cs.Dim,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
             )
         }
     }
@@ -2656,16 +2642,12 @@ private fun share(context: Context, text: String) {
     context.startActivity(Intent.createChooser(intent, "Share reply"))
 }
 
-private const val MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024L
-private const val MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024L
-
 private fun readAttachment(context: Context, uri: Uri): Attachment {
     val resolver = context.contentResolver
     var name = "file"
-    var declaredSize = -1L
     resolver.query(
         uri,
-        arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+        arrayOf(OpenableColumns.DISPLAY_NAME),
         null,
         null,
         null,
@@ -2675,28 +2657,16 @@ private fun readAttachment(context: Context, uri: Uri): Attachment {
             if (nameIndex >= 0 && !cursor.isNull(nameIndex)) {
                 name = cursor.getString(nameIndex)?.takeIf { it.isNotBlank() } ?: name
             }
-            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-            if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
-                declaredSize = cursor.getLong(sizeIndex)
-            }
         }
-    }
-    if (declaredSize > MAX_ATTACHMENT_BYTES) {
-        throw IllegalArgumentException("File is too large (max 12 MB)")
     }
 
     val mime = resolver.getType(uri) ?: "application/octet-stream"
     val bytes = resolver.openInputStream(uri)?.use { input ->
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(64 * 1024)
-        var total = 0L
         while (true) {
             val read = input.read(buffer)
             if (read < 0) break
-            total += read
-            if (total > MAX_ATTACHMENT_BYTES) {
-                throw IllegalArgumentException("File is too large (max 12 MB)")
-            }
             output.write(buffer, 0, read)
         }
         output.toByteArray()
