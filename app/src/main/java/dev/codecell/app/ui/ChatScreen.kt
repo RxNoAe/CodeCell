@@ -2288,9 +2288,10 @@ private fun UserAttachmentCard(part: ChatPart) {
         }
     }
 
-    if (isImage && bitmap != null) {
+    val image = bitmap
+    if (isImage && image != null) {
         Image(
-            bitmap = bitmap,
+            bitmap = image,
             contentDescription = part.title.ifBlank { "Attached image" },
             contentScale = ContentScale.Crop,
             modifier = Modifier

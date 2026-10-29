@@ -81,7 +81,7 @@ class NotifyReceiver : BroadcastReceiver() {
     private fun writeResult(path: String?, value: String) {
         if (path.isNullOrBlank()) return
         val target = runCatching { File(path).canonicalFile }.getOrNull() ?: return
-        val workspace = runCatching { WORKSPACE.canonicalFile }.getOrNull() ?: return
+        val workspace = runCatching { File(WORKSPACE).canonicalFile }.getOrNull() ?: return
         if (!target.path.startsWith(workspace.path + File.separator)) return
         if (!target.name.startsWith(".notify-result.")) return
         runCatching { target.writeText(value) }
