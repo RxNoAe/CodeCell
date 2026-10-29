@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
@@ -552,11 +554,33 @@ private fun FolderSetup(
     ) {
         onAccessChanged(hasFileAccess(context))
     }
+    var batteryUnrestricted by remember {
+        mutableStateOf(isBatteryUnrestricted(context))
+    }
+    val batteryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        batteryUnrestricted = isBatteryUnrestricted(context)
+    }
     fun requestAccess() {
         permissionLauncher.launch(storagePermissions)
     }
+    fun requestBatteryExemption() {
+        val direct = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:${context.packageName}"),
+        )
+        runCatching { batteryLauncher.launch(direct) }.onFailure {
+            runCatching {
+                batteryLauncher.launch(
+                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                )
+            }
+        }
+    }
     LaunchedEffect(Unit) {
         if (!hasAccess) requestAccess()
+        batteryUnrestricted = isBatteryUnrestricted(context)
     }
 
     val picker = rememberLauncherForActivityResult(
@@ -742,6 +766,77 @@ private fun FolderSetup(
             }
         }
 
+        Spacer(Modifier.height(12.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Cs.Input.copy(alpha = 0.5f))
+                .border(
+                    1.dp,
+                    if (batteryUnrestricted) Cs.Line else Cs.LineSoft,
+                    RoundedCornerShape(20.dp),
+                )
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Cs.SheetTop),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.BatteryFull,
+                        contentDescription = null,
+                        tint = if (batteryUnrestricted) Cs.Success else Cs.Warn,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "Background reliability",
+                        color = Cs.Text,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        text = if (batteryUnrestricted) {
+                            "Background use is unrestricted"
+                        } else {
+                            "Android may stop the server when CodeCell is in the background"
+                        },
+                        color = Cs.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (batteryUnrestricted) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = Cs.Success,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            if (!batteryUnrestricted) {
+                OutlinedButton(
+                    onClick = { requestBatteryExemption() },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Allow background use")
+                }
+                Text(
+                    text = "Recommended so commands keep running when the screen is off.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Cs.Dim,
+                )
+            }
+        }
+
         Spacer(Modifier.height(18.dp))
         Text(
             text = "Your API keys stay in the opencode server on this device. " +
@@ -762,6 +857,10 @@ private fun hasFileAccess(context: Context): Boolean {
         Environment.isExternalStorageManager()
     return runtimeGranted || allFilesGranted
 }
+
+private fun isBatteryUnrestricted(context: Context): Boolean =
+    context.getSystemService(PowerManager::class.java)
+        ?.isIgnoringBatteryOptimizations(context.packageName) == true
 
 @Composable
 private fun LinuxSetup(
