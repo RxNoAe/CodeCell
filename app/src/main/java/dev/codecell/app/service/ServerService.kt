@@ -9,13 +9,34 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import dev.codecell.app.MainActivity
 import dev.codecell.app.R
+import dev.codecell.app.data.AppConfig
 import dev.codecell.app.data.LocalServer
 import java.io.File
+import java.net.URI
 
 class ServerService : Service() {
+
+    @Volatile
+    private var stopping = false
+
+    @Volatile
+    private var stopRequested = false
+
+    @Volatile
+    private var workspace = File("")
+
+    @Volatile
+    private var password = ""
+
+    @Volatile
+    private var port = DEFAULT_PORT
+
+    private var monitor: Thread? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -24,29 +45,101 @@ class ServerService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
 
         if (intent?.action == ACTION_STOP) {
+            stopRequested = true
+            stopping = true
+            monitor?.interrupt()
+            monitor = null
+            releaseWakeLock()
             LocalServer.stop()
             stopSelf()
             return START_NOT_STICKY
         }
 
+        stopping = false
+        stopRequested = false
+        acquireWakeLock()
+
+        val config = AppConfig(this)
+        workspace = File(
+            intent?.getStringExtra(EXTRA_WORKSPACE)
+                ?: config.workspacePath,
+        )
+        password = intent?.getStringExtra(EXTRA_PASSWORD)
+            ?: config.serverPassword
+        val configuredPort = portOf(config.serverUrl)
+        port = intent?.getIntExtra(EXTRA_PORT, configuredPort) ?: configuredPort
+
         if (!LocalServer.isRunning()) {
-            val workspace = File(
-                intent?.getStringExtra(EXTRA_WORKSPACE)
-                    ?: LocalServer.workspaceDir(this).absolutePath,
-            )
-            val password = intent?.getStringExtra(EXTRA_PASSWORD).orEmpty()
-            val port = intent?.getIntExtra(EXTRA_PORT, DEFAULT_PORT) ?: DEFAULT_PORT
             Thread {
                 LocalServer.start(this, workspace, password, port)
             }.start()
         }
-        return START_NOT_STICKY
+        startMonitor()
+        return START_STICKY
     }
 
     override fun onDestroy() {
-        LocalServer.stop()
+        stopping = true
+        monitor?.interrupt()
+        monitor = null
+        releaseWakeLock()
+        if (stopRequested) LocalServer.stop()
         super.onDestroy()
     }
+
+    private fun startMonitor() {
+        if (monitor?.isAlive == true) return
+        monitor = Thread {
+            while (!stopping) {
+                try {
+                    Thread.sleep(5_000)
+                } catch (e: InterruptedException) {
+                    return@Thread
+                }
+                if (stopping) return@Thread
+                if (!LocalServer.isRunning()) {
+                    val started = LocalServer.start(
+                        this@ServerService,
+                        workspace,
+                        password,
+                        port,
+                    )
+                    if (!started) {
+                        try {
+                            Thread.sleep(10_000)
+                        } catch (e: InterruptedException) {
+                            return@Thread
+                        }
+                    }
+                }
+            }
+        }.apply {
+            name = "opencode-watchdog"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val power = getSystemService(PowerManager::class.java)
+        wakeLock = power.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "CodeCell::opencode",
+        ).apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.takeIf { it.isHeld }?.release()
+        wakeLock = null
+    }
+
+    private fun portOf(url: String): Int = runCatching {
+        URI(url.trim()).port.takeIf { it > 0 } ?: DEFAULT_PORT
+    }.getOrDefault(DEFAULT_PORT)
 
     private fun buildNotification(): Notification {
         val open = PendingIntent.getActivity(
