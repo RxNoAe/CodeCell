@@ -1800,10 +1800,12 @@ private fun ToolCard(part: ChatPart) {
     val showCode = code.isNotBlank() && snippet != code
     val running = part.status == "running" || part.status == "pending"
     val liveShell = running && (part.tool == "bash" || part.tool == "shell")
+    val liveCode = running && (part.tool == "edit" || part.tool == "write")
     val hasMore = showCode ||
         part.output.isNotBlank() ||
         part.error.isNotBlank() ||
         liveShell ||
+        liveCode ||
         (part.detail.isNotBlank() && part.detail != "{}")
     var expanded by remember(part.id) { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
@@ -1869,7 +1871,9 @@ private fun ToolCard(part: ChatPart) {
             }
         }
         if (expanded) {
-            if (showCode) {
+            if (liveCode) {
+                LiveCodeSection(part, accent)
+            } else if (showCode) {
                 ExpandableCode(code, Cs.Body, maxLines = 14)
             }
             if (part.error.isNotBlank()) {
@@ -2012,6 +2016,70 @@ private fun QuestionToolCard(part: ChatPart) {
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiveCodeSection(part: ChatPart, accent: Color) {
+    val running = part.status == "running" || part.status == "pending"
+    val text = toolCode(part)
+    val lines = if (text.isBlank()) 0 else text.count { it == '\n' } + 1
+    val scroll = rememberScrollState()
+    LaunchedEffect(text, running) {
+        if (running && text.isNotBlank()) {
+            delay(16)
+            scroll.scrollTo(scroll.maxValue)
+        }
+    }
+    SectionLabel(if (running) "LIVE CODE" else "CODE")
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (running) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(10.dp),
+                    color = accent,
+                    strokeWidth = 1.5.dp,
+                )
+                Spacer(Modifier.width(5.dp))
+            }
+            Text(
+                text = if (running) {
+                    if (lines > 0) "writing · $lines lines" else "starting"
+                } else {
+                    if (lines == 1) "1 line" else "$lines lines"
+                },
+                color = if (running) accent else Cs.Dim,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        Spacer(Modifier.height(5.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 72.dp, max = 220.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Cs.Bg.copy(alpha = 0.55f))
+                .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(10.dp))
+                .verticalScroll(scroll)
+                .padding(10.dp),
+        ) {
+            Text(
+                text = text.ifBlank {
+                    if (running) "Waiting for code..." else "(no code)"
+                },
+                color = if (text.isBlank()) Cs.Dim else Cs.Body,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 17.sp,
+                ),
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }
