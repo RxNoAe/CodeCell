@@ -185,6 +185,7 @@ object TermuxEnvironment {
             "data/data/com.termux/cache/apt/archives/partial",
             "storage/emulated/0",
             "tmp",
+            "linkerconfig",
             "dev",
             "proc",
             "sys",
@@ -231,9 +232,15 @@ object TermuxEnvironment {
             export LD_LIBRARY_PATH="${'$'}FILES/termux-libs:${'$'}NATIVE"
             CWD="${'$'}(pwd)"
             mkdir -p "${'$'}ROOT${'$'}CWD" 2>/dev/null
+            LINKER_BIND=""
+            if [ -r /linkerconfig/ld.config.txt ] && mkdir -p "${'$'}ROOT/linkerconfig" 2>/dev/null; then
+              : > "${'$'}ROOT/linkerconfig/ld.config.txt"
+              LINKER_BIND="-b /linkerconfig/ld.config.txt:/linkerconfig/ld.config.txt"
+            fi
             exec "${'$'}NATIVE/libproot.so" --link2symlink -i 10287 -r "${'$'}ROOT" \
               -b /dev -b /proc -b /sys -b /apex -b /system -b /vendor \
               -b /storage -b /sdcard \
+              ${'$'}LINKER_BIND \
               -w "${'$'}CWD" \
               $GUEST_PREFIX/bin/env -i \
                 HOME=$GUEST_HOME \

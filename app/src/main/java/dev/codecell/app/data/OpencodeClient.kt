@@ -517,11 +517,21 @@ object OpencodeClient {
                         else -> input.toString()
                     }
                     val metadataObject = state?.optJSONObject("metadata")
-                    val output = state?.optString("output").orEmpty()
-                        .takeIf { it.isNotBlank() && it != "null" }
-                        ?: metadataObject?.optString("output").orEmpty()
-                    val error = state?.optString("error").orEmpty()
-                    val metadata = metadataObject?.toString(2).orEmpty()
+                    val output = cleanToolOutput(
+                        state?.optString("output").orEmpty()
+                            .takeIf { it.isNotBlank() && it != "null" }
+                            ?: metadataObject?.optString("output").orEmpty(),
+                    )
+                    val error = cleanToolOutput(state?.optString("error").orEmpty())
+                    val metadata = metadataObject?.let { obj ->
+                        if (obj.has("output")) {
+                            val copy = JSONObject(obj.toString())
+                            copy.put("output", cleanToolOutput(obj.optString("output")))
+                            copy.toString(2)
+                        } else {
+                            obj.toString(2)
+                        }
+                    }.orEmpty()
                     val progress = if (toolName == "bash" || toolName == "shell") {
                         parseToolProgress(output)
                     } else {
@@ -665,7 +675,47 @@ object OpencodeClient {
     private data class ToolProgress(val fraction: Float?, val label: String)
 
     private val ansiEscape = Regex("\u001B\\[[0-9;?]*[ -/]*[@-~]")
+    private val oscEscape = Regex("\u001B\\][^\u0007]*(?:\u0007|\u001B\\\\)")
+    private val controlCharacters = Regex("[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]")
+    private val linkerWarning = Regex(
+        """WARNING:\s*linker:\s*Warning:\s*failed to find generated linker configuration from\s*["'][^"']*["']""",
+        RegexOption.IGNORE_CASE,
+    )
     private val percentValue = Regex("""(\d{1,3}(?:\.\d+)?)\s*%""")
+
+    private fun eraseBackspaces(value: String): String {
+        if ('\b' !in value) return value
+        val result = StringBuilder(value.length)
+        for (ch in value) {
+            if (ch == '\b') {
+                if (result.isNotEmpty()) result.setLength(result.length - 1)
+            } else {
+                result.append(ch)
+            }
+        }
+        return result.toString()
+    }
+
+    private fun cleanToolOutput(text: String): String {
+        if (text.isEmpty()) return text
+        return text
+            .replace(ansiEscape, "")
+            .replace(oscEscape, "")
+            .replace("\r\n", "\n")
+            .lineSequence()
+            .map { it.substringAfterLast('\r') }
+            .map(::eraseBackspaces)
+            .map { line ->
+                val cleaned = linkerWarning.replace(line, "")
+                if (cleaned.isBlank() && line.isNotBlank()) null else cleaned
+            }
+            .filterNotNull()
+            .filterNot { it.trimStart().startsWith("WARNING: linker:", ignoreCase = true) }
+            .map { controlCharacters.replace(it, "") }
+            .joinToString("\n")
+            .replace(Regex("\n{3,}"), "\n\n")
+            .trim()
+    }
 
     private fun parseToolProgress(output: String): ToolProgress {
         val lines = output
