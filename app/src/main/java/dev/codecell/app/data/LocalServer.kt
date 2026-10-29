@@ -77,6 +77,7 @@ object LocalServer {
         )
         builder.directory(workspace)
         builder.redirectErrorStream(true)
+        TermuxEnvironment.ensureRuntimeConfig(context)
         val termuxShell = TermuxEnvironment.shell(context)
         val path = listOfNotNull(
             termuxShell?.parentFile?.absolutePath,
@@ -95,6 +96,7 @@ object LocalServer {
             put("PATH", path)
             put("SHELL", termuxShell?.absolutePath ?: "/system/bin/sh")
             put("OPENCODE_SERVER_USERNAME", "opencode")
+            put("OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS", "900000")
             if (password.isNotBlank()) put("OPENCODE_SERVER_PASSWORD", password)
         }
 

@@ -35,6 +35,8 @@ data class ChatPart(
     val error: String = "",
     val files: List<String> = emptyList(),
     val detail: String = "",
+    val progress: Float? = null,
+    val progressLabel: String = "",
     val questions: List<QuestionInfo> = emptyList(),
     val answers: List<List<String>> = emptyList(),
 )

@@ -1817,7 +1817,7 @@ private fun ToolCard(part: ChatPart) {
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(6.dp))
-            ToolStatus(part.status, accent)
+            ToolStatus(part, accent)
             if (expanded && copyText.isNotBlank()) {
                 IconButton(
                     onClick = { clipboard.setText(AnnotatedString(copyText)) },
@@ -1994,20 +1994,69 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun ToolStatus(status: String, accent: Color) {
-    when (status) {
-        "running", "pending" -> CircularProgressIndicator(
+private fun ToolStatus(part: ChatPart, accent: Color) {
+    val running = part.status == "running" || part.status == "pending"
+    when {
+        running && (part.tool == "bash" || part.tool == "shell") ->
+            ToolProgressStatus(part, accent)
+
+        running -> CircularProgressIndicator(
             modifier = Modifier.size(11.dp),
             color = accent,
             strokeWidth = 1.5.dp,
         )
 
-        "error" -> Icon(
+        part.status == "error" -> Icon(
             imageVector = Icons.Filled.ErrorOutline,
             contentDescription = "Tool failed",
             tint = Cs.Error,
             modifier = Modifier.size(13.dp),
         )
+    }
+}
+
+@Composable
+private fun ToolProgressStatus(part: ChatPart, accent: Color) {
+    val fraction = part.progress
+    val animated by animateFloatAsState(
+        targetValue = fraction ?: 0f,
+        label = "toolProgress",
+    )
+    val pulse = rememberInfiniteTransition(label = "toolProgressPulse")
+    val pulseFraction by pulse.animateFloat(
+        initialValue = 0.15f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "toolProgressPulseValue",
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = if (fraction != null) {
+                "${(fraction * 100).toInt()}%"
+            } else {
+                part.progressLabel.ifBlank { "Working" }
+            },
+            color = if (fraction != null) accent else Cs.Dim,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+        )
+        Spacer(Modifier.width(5.dp))
+        Box(
+            Modifier
+                .width(46.dp)
+                .height(4.dp)
+                .clip(CircleShape)
+                .background(accent.copy(alpha = 0.18f)),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(
+                        (if (fraction != null) animated else pulseFraction).coerceIn(0f, 1f),
+                    )
+                    .fillMaxHeight()
+                    .background(accent),
+            )
+        }
     }
 }
 

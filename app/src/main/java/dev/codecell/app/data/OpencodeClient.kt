@@ -516,10 +516,17 @@ object OpencodeClient {
                         null, JSONObject.NULL -> ""
                         else -> input.toString()
                     }
-                    val output = state?.optString("output").orEmpty()
-                    val error = state?.optString("error").orEmpty()
                     val metadataObject = state?.optJSONObject("metadata")
+                    val output = state?.optString("output").orEmpty()
+                        .takeIf { it.isNotBlank() && it != "null" }
+                        ?: metadataObject?.optString("output").orEmpty()
+                    val error = state?.optString("error").orEmpty()
                     val metadata = metadataObject?.toString(2).orEmpty()
+                    val progress = if (toolName == "bash" || toolName == "shell") {
+                        parseToolProgress(output)
+                    } else {
+                        null
+                    }
                     result += ChatPart(
                         id = id,
                         type = type,
@@ -530,6 +537,8 @@ object OpencodeClient {
                         output = output,
                         error = error,
                         detail = metadata,
+                        progress = progress?.fraction,
+                        progressLabel = progress?.label.orEmpty(),
                         questions = if (toolName == "question") {
                             parseQuestions(inputObject?.optJSONArray("questions"))
                         } else {
@@ -651,6 +660,50 @@ object OpencodeClient {
             throw OpencodeException(message.ifBlank { "The model returned an error" })
         }
         return "Done."
+    }
+
+    private data class ToolProgress(val fraction: Float?, val label: String)
+
+    private val ansiEscape = Regex("\u001B\\[[0-9;?]*[ -/]*[@-~]")
+    private val percentValue = Regex("""(\d{1,3}(?:\.\d+)?)\s*%""")
+
+    private fun parseToolProgress(output: String): ToolProgress {
+        val lines = output
+            .replace('\r', '\n')
+            .replace(ansiEscape, "")
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toList()
+        val line = lines.lastOrNull().orEmpty()
+        val lower = line.lowercase()
+        val installing = lower.contains("setting up") ||
+            lower.contains("unpacking") ||
+            lower.contains("selecting previously") ||
+            lower.contains("preparing to unpack") ||
+            lower.contains("reading database") ||
+            lower.contains("fetched")
+        val downloading = lower.contains("get:") ||
+            lower.contains("downloading")
+        val building = lower.contains("executing") ||
+            lower.contains("building") ||
+            lower.contains("configuring") ||
+            lower.contains("> task")
+        val label = when {
+            installing -> "Installing"
+            downloading -> "Downloading"
+            building -> "Building"
+            else -> "Working"
+        }
+        val fraction = if (installing) {
+            null
+        } else {
+            percentValue.find(line)?.groupValues?.get(1)
+                ?.toFloatOrNull()
+                ?.div(100f)
+                ?.coerceIn(0f, 1f)
+        }
+        return ToolProgress(fraction, label)
     }
 
     private fun url(baseUrl: String, path: String): String =

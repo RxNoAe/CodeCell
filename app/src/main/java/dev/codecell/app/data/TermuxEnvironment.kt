@@ -55,7 +55,14 @@ object TermuxEnvironment {
         }
         deleteTree(previous)
         writeLauncher(context)
+        writePackageConfig(context)
         onProgress(1f)
+    }
+
+    fun ensureRuntimeConfig(context: Context) {
+        if (!isInstalled(context)) return
+        writePackageConfig(context)
+        writeLauncher(context)
     }
 
     fun uninstall(context: Context) {
@@ -236,6 +243,12 @@ object TermuxEnvironment {
                 TMPDIR=$GUEST_PREFIX/tmp \
                 LANG=C.UTF-8 \
                 TERM=xterm-256color \
+                DEBIAN_FRONTEND=noninteractive \
+                APT_LISTCHANGES_FRONTEND=none \
+                NEEDRESTART_MODE=a \
+                GIT_TERMINAL_PROMPT=0 \
+                PIP_NO_INPUT=1 \
+                CI=1 \
                 ANDROID_ROOT=/system \
                 ANDROID_DATA=/data \
                 EXTERNAL_STORAGE=/sdcard \
@@ -251,6 +264,25 @@ object TermuxEnvironment {
         val bash = File(bin, "bash")
         bash.delete()
         Os.symlink("../termux-shell.sh", bash.absolutePath)
+    }
+
+    private fun writePackageConfig(context: Context) {
+        val root = root(context)
+        val config = File(root, "$PREFIX/etc/apt/apt.conf.d/99codecell")
+        config.parentFile?.mkdirs()
+        config.writeText(
+            """
+            APT::Get::Assume-Yes "true";
+            APT::Get::Assume-No "false";
+            APT::Get::allowUnauthenticated "false";
+            Dpkg::Options {
+              "--force-confdef";
+              "--force-confold";
+            };
+            Dpkg::Use-Pty "false";
+            """.trimIndent() + "\n",
+        )
+        File(root, "data/data/com.termux/cache/apt/archives/partial").mkdirs()
     }
 
     private fun deleteTree(file: File) {
