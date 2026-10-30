@@ -16,6 +16,8 @@ import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
 import java.net.UnknownHostException
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 
 class OpencodeException(message: String) : Exception(message)
 
@@ -28,6 +30,51 @@ object OpencodeClient {
     private const val CONNECT_TIMEOUT_MS = 8_000
     private const val READ_TIMEOUT_MS = 300_000
     private const val HEALTH_TIMEOUT_MS = 4_000
+    private const val MAX_TEXT_ATTACHMENT_BYTES = 256 * 1024
+
+    private val TEXT_MIME_TYPES = setOf(
+        "application/json",
+        "application/ld+json",
+        "application/problem+json",
+        "application/xml",
+        "application/xhtml+xml",
+        "application/javascript",
+        "application/x-javascript",
+        "application/typescript",
+        "application/x-typescript",
+        "application/yaml",
+        "application/x-yaml",
+        "application/toml",
+        "application/sql",
+        "application/graphql",
+        "application/x-sh",
+        "application/x-httpd-php",
+        "application/x-python",
+        "application/x-ruby",
+        "application/x-perl",
+        "application/x-lua",
+        "application/x-tex",
+        "application/rtf",
+        "application/x-ndjson",
+        "application/jsonl",
+        "application/x-jsonlines",
+    )
+
+    private val BINARY_MIME_TYPES = setOf(
+        "application/pdf",
+        "application/zip",
+        "application/gzip",
+        "application/x-gzip",
+        "application/x-tar",
+        "application/x-7z-compressed",
+        "application/vnd.rar",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
 
     @Volatile
     private var authHeader: String? = null
@@ -155,17 +202,22 @@ object OpencodeClient {
                 parts.put(JSONObject().put("type", "text").put("text", text))
             }
             attachments.forEach { attachment ->
-                parts.put(
-                    JSONObject()
-                        .put("type", "file")
-                        .put("mime", attachment.mime)
-                        .put("filename", attachment.name)
-                        .put(
-                            "url",
-                            "data:${attachment.mime};base64," +
-                                Base64.encodeToString(attachment.bytes, Base64.NO_WRAP),
-                        ),
-                )
+                val fileText = textAttachment(attachment)
+                if (fileText != null) {
+                    parts.put(JSONObject().put("type", "text").put("text", fileText))
+                } else {
+                    parts.put(
+                        JSONObject()
+                            .put("type", "file")
+                            .put("mime", attachment.mime)
+                            .put("filename", attachment.name)
+                            .put(
+                                "url",
+                                "data:${attachment.mime};base64," +
+                                    Base64.encodeToString(attachment.bytes, Base64.NO_WRAP),
+                            ),
+                    )
+                }
             }
             put("parts", parts)
         }
@@ -850,6 +902,51 @@ object OpencodeClient {
                     "Restart the server in Settings if this continues."
             }
         }
+    }
+
+    private fun textAttachment(attachment: Attachment): String? {
+        val mime = attachment.mime.lowercase()
+        val knownBinary = mime.startsWith("image/") ||
+            mime.startsWith("audio/") ||
+            mime.startsWith("video/") ||
+            mime.startsWith("font/") ||
+            mime in BINARY_MIME_TYPES
+        if (!isTextMime(mime) && (knownBinary || !looksLikeText(attachment.bytes))) return null
+        val truncated = attachment.bytes.size > MAX_TEXT_ATTACHMENT_BYTES
+        val bytes = if (truncated) {
+            attachment.bytes.copyOf(MAX_TEXT_ATTACHMENT_BYTES)
+        } else {
+            attachment.bytes
+        }
+        val content = runCatching { bytes.toString(Charsets.UTF_8) }.getOrNull() ?: return null
+        val safeName = attachment.name.replace("\"", "'")
+        return buildString {
+            append("<file name=\"").append(safeName).append("\" mime=\"")
+                .append(attachment.mime).append("\">\n")
+            append(content)
+            if (!content.endsWith("\n")) append("\n")
+            if (truncated) append("\n[Truncated at 256 KB]\n")
+            append("</file>")
+        }
+    }
+
+    private fun isTextMime(mime: String): Boolean {
+        val value = mime.lowercase()
+        return value.startsWith("text/") ||
+            value.endsWith("+json") ||
+            value.endsWith("+xml") ||
+            value.endsWith("+yaml") ||
+            value in TEXT_MIME_TYPES
+    }
+
+    private fun looksLikeText(bytes: ByteArray): Boolean {
+        if (bytes.isEmpty()) return true
+        val sample = if (bytes.size > 8_192) bytes.copyOf(8_192) else bytes
+        if (sample.any { it == 0.toByte() }) return false
+        val decoder = Charsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        return runCatching { decoder.decode(ByteBuffer.wrap(sample)) }.isSuccess
     }
 
     private fun endpointOf(target: String): String = runCatching {
