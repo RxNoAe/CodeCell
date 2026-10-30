@@ -2,6 +2,7 @@ package dev.codecell.app.data
 
 import android.content.Context
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * Owns the embedded opencode process. The binary ships as
@@ -131,8 +132,14 @@ object LocalServer {
     }
 
     fun stop() = synchronized(lock) {
-        process?.destroy()
+        val running = process
         process = null
+        if (running != null) {
+            running.destroy()
+            runCatching {
+                if (!running.waitFor(1, TimeUnit.SECONDS)) running.destroyForcibly()
+            }
+        }
         workspacePath = ""
         state = State.Stopped
         message = "Stopped"

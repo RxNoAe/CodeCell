@@ -29,6 +29,7 @@
             android:name=".service.ServerService"
             android:exported="false"
             android:foregroundServiceType="specialUse"
+            android:process=":server"
             android:stopWithTask="false">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"

@@ -69,6 +69,10 @@ class AppConfig(context: Context) {
         get() = prefs.getBoolean(KEY_PROMPTED, false)
         set(value) = prefs.edit().putBoolean(KEY_PROMPTED, value).apply()
 
+    var batteryAsked: Boolean
+        get() = prefs.getBoolean(KEY_BATTERY_ASKED, false)
+        set(value) = prefs.edit().putBoolean(KEY_BATTERY_ASKED, value).apply()
+
     var onboarded: Boolean
         get() = prefs.getBoolean(KEY_ONBOARDED, false)
         set(value) = prefs.edit().putBoolean(KEY_ONBOARDED, value).apply()
@@ -129,6 +133,7 @@ class AppConfig(context: Context) {
         private const val KEY_NAME = "user_name"
         private const val KEY_TREE = "tree_uri"
         private const val KEY_PROMPTED = "folder_prompted"
+        private const val KEY_BATTERY_ASKED = "battery_asked"
         private const val KEY_ONBOARDED = "onboarded"
         private const val KEY_PROVIDERS = "configured_providers"
         private const val KEY_AGENT = "agent_name"

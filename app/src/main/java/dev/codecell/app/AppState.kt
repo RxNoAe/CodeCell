@@ -82,6 +82,7 @@ class AppState(context: Context) {
 
     private var sendJob: Job? = null
     private var activePollJob: Job? = null
+    private var serverJob: Job? = null
     private var userStopped = false
 
     var builtinAgents by mutableStateOf(DEFAULT_AGENTS)
@@ -118,20 +119,14 @@ class AppState(context: Context) {
 
     fun ensureServer(scope: CoroutineScope) {
         if (serverPhase == ServerPhase.Starting) return
-        if (serverPhase == ServerPhase.Running) {
-            val embedded = LocalServer.workspacePath
-            if (!LocalServer.isRunning() || embedded == config.workspacePath) return
-            ServerService.stop(appContext)
-            LocalServer.stop()
-            serverPhase = ServerPhase.Stopped
-        }
+        if (serverJob?.isActive == true) return
 
         val password = config.serverPassword
         OpencodeClient.setCredentials("opencode", password)
         serverPhase = ServerPhase.Starting
-        serverStatus = "Starting opencode..."
+        serverStatus = "Checking opencode..."
 
-        scope.launch {
+        serverJob = scope.launch {
             val alreadyRunning = withContext(Dispatchers.IO) {
                 runCatching { OpencodeClient.health(serverUrl) }.isSuccess
             }
@@ -147,6 +142,7 @@ class AppState(context: Context) {
                 return@launch
             }
             workspacePath = workspace.absolutePath
+            serverStatus = "Starting opencode..."
             ServerService.start(appContext, workspace, password, portOf(serverUrl))
 
             val deadline = System.currentTimeMillis() + 90_000
@@ -159,26 +155,29 @@ class AppState(context: Context) {
                     onServerReady(scope)
                     return@launch
                 }
-                if (LocalServer.state == LocalServer.State.Failed) break
             }
 
             serverPhase = ServerPhase.Failed
             val tail = withContext(Dispatchers.IO) { LocalServer.logTail(appContext, 8) }
-            val detail = tail.ifBlank { LocalServer.message }
-            serverStatus = if (detail.isBlank()) {
+            serverStatus = if (tail.isBlank()) {
                 "opencode did not start."
             } else {
-                "opencode did not start:\n$detail"
+                "opencode did not start:\n$tail"
             }
         }
     }
 
     fun retryServer(scope: CoroutineScope) {
-        ServerService.stop(appContext)
-        LocalServer.stop()
+        val previous = serverJob
+        serverJob = null
         serverPhase = ServerPhase.Stopped
         serverStatus = ""
-        ensureServer(scope)
+        scope.launch {
+            previous?.cancelAndJoin()
+            ServerService.stop(appContext)
+            delay(300)
+            ensureServer(scope)
+        }
     }
 
     fun restartServer(scope: CoroutineScope) {

@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -15,6 +16,7 @@ import dev.codecell.app.MainActivity
 import dev.codecell.app.R
 import dev.codecell.app.data.AppConfig
 import dev.codecell.app.data.LocalServer
+import dev.codecell.app.data.OpencodeClient
 import java.io.File
 import java.net.URI
 
@@ -22,9 +24,6 @@ class ServerService : Service() {
 
     @Volatile
     private var stopping = false
-
-    @Volatile
-    private var stopRequested = false
 
     @Volatile
     private var workspace = File("")
@@ -38,14 +37,19 @@ class ServerService : Service() {
     private var monitor: Thread? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
+    @Volatile
+    private var lastStartAt = 0L
+
+    @Volatile
+    private var healthFailures = 0
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        startForegroundCompat()
 
         if (intent?.action == ACTION_STOP) {
-            stopRequested = true
             stopping = true
             monitor?.interrupt()
             monitor = null
@@ -56,7 +60,6 @@ class ServerService : Service() {
         }
 
         stopping = false
-        stopRequested = false
         acquireWakeLock()
 
         val config = AppConfig(this)
@@ -68,7 +71,9 @@ class ServerService : Service() {
             ?: config.serverPassword
         val configuredPort = portOf(config.serverUrl)
         port = intent?.getIntExtra(EXTRA_PORT, configuredPort) ?: configuredPort
+        OpencodeClient.setCredentials("opencode", password)
 
+        lastStartAt = System.currentTimeMillis()
         if (!LocalServer.isRunning()) {
             Thread {
                 LocalServer.start(this, workspace, password, port)
@@ -78,12 +83,20 @@ class ServerService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (stopping) return
+        acquireWakeLock()
+        startMonitor()
+        runCatching { startForegroundCompat() }
+    }
+
     override fun onDestroy() {
         stopping = true
         monitor?.interrupt()
         monitor = null
         releaseWakeLock()
-        if (stopRequested) LocalServer.stop()
+        LocalServer.stop()
         super.onDestroy()
     }
 
@@ -97,26 +110,58 @@ class ServerService : Service() {
                     return@Thread
                 }
                 if (stopping) return@Thread
+                if (System.currentTimeMillis() - lastStartAt < 15_000) continue
                 if (!LocalServer.isRunning()) {
-                    val started = LocalServer.start(
-                        this@ServerService,
-                        workspace,
-                        password,
-                        port,
-                    )
-                    if (!started) {
-                        try {
-                            Thread.sleep(10_000)
-                        } catch (e: InterruptedException) {
-                            return@Thread
-                        }
-                    }
+                    healthFailures = 0
+                    restartServer()
+                    continue
+                }
+                if (isServerHealthy()) {
+                    healthFailures = 0
+                } else if (++healthFailures >= 2) {
+                    healthFailures = 0
+                    LocalServer.stop()
+                    restartServer()
                 }
             }
         }.apply {
             name = "opencode-watchdog"
             isDaemon = true
             start()
+        }
+    }
+
+    private fun restartServer() {
+        lastStartAt = System.currentTimeMillis()
+        val started = LocalServer.start(
+            this@ServerService,
+            workspace,
+            password,
+            port,
+        )
+        if (!started) {
+            try {
+                Thread.sleep(10_000)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+    }
+
+    private fun isServerHealthy(): Boolean = runCatching {
+        OpencodeClient.health("http://127.0.0.1:$port", timeoutMs = 3_000)
+    }.isSuccess
+
+    private fun startForegroundCompat() {
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
         }
     }
 
