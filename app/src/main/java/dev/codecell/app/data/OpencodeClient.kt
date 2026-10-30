@@ -147,7 +147,7 @@ object OpencodeClient {
                     title = "ERROR",
                     text = errorMessage(0, it.toString()),
                 )
-            }
+            }?.takeIf { !it.text.contains("abort", ignoreCase = true) }
             val parts = parseParts(item.optJSONArray("parts")) + listOfNotNull(errorPart)
             val joined = joinText(item.optJSONArray("parts"))
             val text = joined.ifBlank { errorPart?.text.orEmpty() }

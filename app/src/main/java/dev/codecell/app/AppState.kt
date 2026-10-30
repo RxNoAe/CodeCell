@@ -83,6 +83,8 @@ class AppState(context: Context) {
     private var sendJob: Job? = null
     private var activePollJob: Job? = null
     private var serverJob: Job? = null
+
+    @Volatile
     private var userStopped = false
 
     var builtinAgents by mutableStateOf(DEFAULT_AGENTS)
@@ -465,10 +467,11 @@ class AppState(context: Context) {
                 sessionForCleanup = activeSession
 
                 pollJob = scope.launch(Dispatchers.IO) {
-                    while (isActive) {
+                    while (isActive && !userStopped) {
                         val loaded = runCatching {
                             OpencodeClient.loadMessages(serverUrl, activeSession)
                         }.getOrNull()
+                        if (userStopped) return@launch
                         if (loaded != null) {
                             val fresh = loaded.filter {
                                 it.role == "assistant" &&
@@ -481,6 +484,7 @@ class AppState(context: Context) {
                                 val parts = fresh.flatMap { it.parts }
                                 val serverId = fresh.last().id
                                 withContext(Dispatchers.Main) {
+                                    if (userStopped) return@withContext
                                     seenAssistantIds += fresh.map { it.id }
                                     val live = liveMessageId
                                     if (live == null) {
@@ -539,6 +543,10 @@ class AppState(context: Context) {
                         attachments = attachments,
                     )
                 }
+                if (userStopped) {
+                    markStopped()
+                    return@launch
+                }
                 revertMessageID = null
                 markRunning()
                 pollJob?.cancelAndJoin()
@@ -591,9 +599,7 @@ class AppState(context: Context) {
                 pollJob = null
                 activePollJob = null
                 if (userStopped) {
-                    if (liveMessageId == null) {
-                        append(Role.Assistant, "Stopped.")
-                    }
+                    markStopped()
                 } else {
                     val message = e.message ?: "Request failed"
                     val live = liveMessageId
@@ -635,6 +641,45 @@ class AppState(context: Context) {
         if (isNew) sessionTitle = title
     }
 
+    private fun markStopped() {
+        val live = liveMessageId
+        if (live == null) {
+            val last = messages.lastOrNull()
+            if (last?.role == Role.Assistant && last.text.trim() == "Stopped.") return
+            append(Role.Assistant, "Stopped.")
+            return
+        }
+        messages = messages.map { message ->
+            if (message.id != live) return@map message
+            val parts = message.parts.filterNot { part ->
+                part.type == "error" && part.text.contains("abort", ignoreCase = true)
+            }
+            if (parts.isEmpty()) {
+                val body = message.text.trim()
+                val text = when {
+                    body.isBlank() -> "Stopped."
+                    body.endsWith("Stopped.") -> message.text
+                    else -> "$body\n\nStopped."
+                }
+                message.copy(text = text, isError = false, parts = emptyList())
+            } else {
+                val alreadyStopped = parts.any {
+                    it.type == "text" && it.text.trim() == "Stopped."
+                }
+                val nextParts = if (alreadyStopped) {
+                    parts
+                } else {
+                    parts + ChatPart(
+                        id = "stopped-${message.id}",
+                        type = "text",
+                        text = "Stopped.",
+                    )
+                }
+                message.copy(isError = false, parts = nextParts)
+            }
+        }
+    }
+
     private fun drainQueue(scope: CoroutineScope) {
         if (sending) return
         while (true) {
@@ -649,6 +694,7 @@ class AppState(context: Context) {
         if (!sending) return
         val activeSession = sessionId
         userStopped = true
+        markStopped()
         activePollJob?.cancel()
         activePollJob = null
         OpencodeClient.cancelActiveRequest()

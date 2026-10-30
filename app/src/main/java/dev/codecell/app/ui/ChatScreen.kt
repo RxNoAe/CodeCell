@@ -1739,12 +1739,20 @@ private fun MessageParts(parts: List<ChatPart>, isError: Boolean) {
                     color = Cs.Warn,
                 )
 
-                "error" -> NoticeCard(
-                    title = part.title.ifBlank { "ERROR" },
-                    text = part.text,
-                    detail = "",
-                    color = Cs.Error,
-                )
+                "error" -> if (part.text.contains("abort", ignoreCase = true)) {
+                    Text(
+                        text = "Stopped.",
+                        color = Cs.Muted,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                } else {
+                    NoticeCard(
+                        title = part.title.ifBlank { "ERROR" },
+                        text = part.text,
+                        detail = "",
+                        color = Cs.Error,
+                    )
+                }
 
                 "file" -> FilePartCard(part.title, part.text)
                 "subtask" -> SubtaskCard(part)
