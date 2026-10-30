@@ -96,6 +96,8 @@ object LocalServer {
             put("TMPDIR", tmp.absolutePath)
             put("PATH", path)
             put("SHELL", termuxShell?.absolutePath ?: "/system/bin/sh")
+            put("CODECELL_FILES", context.filesDir.absolutePath)
+            put("CODECELL_NATIVE", context.applicationInfo.nativeLibraryDir)
             put("OPENCODE_SERVER_USERNAME", "opencode")
             put("OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS", "900000")
             if (password.isNotBlank()) put("OPENCODE_SERVER_PASSWORD", password)

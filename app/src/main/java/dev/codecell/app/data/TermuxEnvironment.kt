@@ -33,6 +33,8 @@ object TermuxEnvironment {
 
     fun shell(context: Context): File? {
         if (!isInstalled(context)) return null
+        val launcher = File(context.applicationInfo.nativeLibraryDir, "libcodecell-shell.so")
+        if (!launcher.isFile) return null
         val shell = File(context.filesDir, "termux-bin/bash")
         return shell.takeIf { it.exists() }
     }
@@ -225,6 +227,9 @@ object TermuxEnvironment {
             FILES="$files"
             ROOT="${'$'}FILES/termux"
             NATIVE="$native"
+            if [ -x "${'$'}NATIVE/libcodecell-shell.so" ]; then
+              exec "${'$'}NATIVE/libcodecell-shell.so" "${'$'}@"
+            fi
             unset LD_PRELOAD
             unset LD_DEBUG
             export PROOT_LOADER="${'$'}NATIVE/libprootloader.so"
@@ -270,7 +275,12 @@ object TermuxEnvironment {
         val bin = File(context.filesDir, "termux-bin").apply { mkdirs() }
         val bash = File(bin, "bash")
         bash.delete()
-        Os.symlink("../termux-shell.sh", bash.absolutePath)
+        val launcher = File(native, "libcodecell-shell.so")
+        if (launcher.isFile) {
+            Os.symlink(launcher.absolutePath, bash.absolutePath)
+        } else {
+            Os.symlink("../termux-shell.sh", bash.absolutePath)
+        }
     }
 
     private fun writePackageConfig(context: Context) {

@@ -77,6 +77,20 @@ jobs:
           rm -rf proot libtalloc libandroid-shmem data.tar.* proot.deb libtalloc.deb libandroid-shmem.deb
           ls -lh app/src/main/jniLibs/arm64-v8a/
 
+      - name: Build shell launcher
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          NDK="${ANDROID_NDK_HOME:-}"
+          if [ -z "$NDK" ] || [ ! -d "$NDK" ]; then
+            NDK=$(ls -d "$SDK"/ndk/* 2>/dev/null | sort -V | tail -n 1)
+          fi
+          CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang"
+          test -x "$CC"
+          "$CC" -O2 -fPIE -pie -o app/src/main/jniLibs/arm64-v8a/libcodecell-shell.so tools/shell_launcher.c
+          chmod 755 app/src/main/jniLibs/arm64-v8a/libcodecell-shell.so
+          ls -lh app/src/main/jniLibs/arm64-v8a/libcodecell-shell.so
+
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
