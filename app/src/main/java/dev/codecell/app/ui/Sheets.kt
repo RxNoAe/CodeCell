@@ -1,7 +1,11 @@
 package dev.codecell.app.ui
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.os.PowerManager
 import android.provider.OpenableColumns
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -26,6 +30,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Key
@@ -92,6 +97,12 @@ fun SettingsSheet(
     var termuxBusy by remember { mutableStateOf(false) }
     var termuxProgress by remember { mutableStateOf(0f) }
     var termuxError by remember { mutableStateOf<String?>(null) }
+    var batteryUnrestricted by remember { mutableStateOf(isBatteryUnrestricted(context)) }
+    val batteryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        batteryUnrestricted = isBatteryUnrestricted(context)
+    }
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -197,6 +208,57 @@ fun SettingsSheet(
                     shape = RoundedCornerShape(12.dp),
                 ) {
                     Text("Change folder", style = MaterialTheme.typography.labelLarge)
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.BatteryFull,
+                        contentDescription = null,
+                        tint = if (batteryUnrestricted) Cs.Success else Cs.Warn,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = if (batteryUnrestricted) {
+                                "Background: allowed"
+                            } else {
+                                "Background: restricted"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (batteryUnrestricted) Cs.Text else Cs.Warn,
+                        )
+                        Text(
+                            text = if (batteryUnrestricted) {
+                                "Android won't sleep the server."
+                            } else {
+                                "Android may kill the server when the screen is off."
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Cs.Dim,
+                        )
+                    }
+                    if (!batteryUnrestricted) {
+                        OutlinedButton(
+                            onClick = {
+                                val direct = Intent(
+                                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                    Uri.parse("package:${context.packageName}"),
+                                )
+                                runCatching { batteryLauncher.launch(direct) }.onFailure {
+                                    runCatching {
+                                        batteryLauncher.launch(
+                                            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                                        )
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("Allow", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
                 }
             }
             Text("LINUX ENVIRONMENT", style = MaterialTheme.typography.labelSmall, color = Cs.Dim)
@@ -1597,3 +1659,7 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedLabelColor = Cs.Muted,
     cursorColor = Cs.Text,
 )
+
+private fun isBatteryUnrestricted(context: Context): Boolean =
+    context.getSystemService(PowerManager::class.java)
+        ?.isIgnoringBatteryOptimizations(context.packageName) == true
