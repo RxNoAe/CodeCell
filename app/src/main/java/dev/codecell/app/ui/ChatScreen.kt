@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
+import coil.compose.AsyncImage
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -339,6 +340,7 @@ fun CodeCellApp(state: AppState) {
 
                             state.messages.isEmpty() && !state.sending -> EmptyState(
                                 name = state.userName,
+                                avatar = state.googleAvatar,
                                 phase = state.serverPhase,
                                 status = state.serverStatus,
                                 onRetry = { state.retryServer(scope) },
@@ -671,19 +673,31 @@ private fun DrawerContent(
                 .padding(start = 8.dp, top = 12.dp, bottom = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(Brush.verticalGradient(listOf(Color(0xFF23232B), Color(0xFF16161B))))
-                    .border(1.dp, Cs.Line, RoundedCornerShape(13.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(
-                    painter = painterResource(R.drawable.ic_logo),
+            if (state.googleSignedIn && state.googleAvatar.isNotBlank()) {
+                AsyncImage(
+                    model = state.googleAvatar,
                     contentDescription = null,
-                    modifier = Modifier.size(21.dp),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, Cs.Line, CircleShape),
                 )
+            } else {
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(Brush.verticalGradient(listOf(Color(0xFF23232B), Color(0xFF16161B))))
+                        .border(1.dp, Cs.Line, RoundedCornerShape(13.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_logo),
+                        contentDescription = null,
+                        modifier = Modifier.size(21.dp),
+                    )
+                }
             }
             Spacer(Modifier.size(11.dp))
             Column(Modifier.weight(1f)) {
@@ -693,7 +707,7 @@ private fun DrawerContent(
                     color = Cs.Text,
                 )
                 Text(
-                    text = "opencode client",
+                    text = state.userName.ifBlank { "opencode client" },
                     style = MaterialTheme.typography.labelSmall,
                     color = Cs.Dim,
                 )
@@ -985,6 +999,7 @@ private fun SessionRow(
 @Composable
 private fun EmptyState(
     name: String,
+    avatar: String,
     phase: ServerPhase,
     status: String,
     onRetry: () -> Unit,
@@ -1021,11 +1036,20 @@ private fun EmptyState(
                     .border(1.dp, Cs.Line, RoundedCornerShape(24.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                Image(
-                    painter = painterResource(R.drawable.ic_logo),
-                    contentDescription = null,
-                    modifier = Modifier.size(36.dp),
-                )
+                if (avatar.isNotBlank()) {
+                    AsyncImage(
+                        model = avatar,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(68.dp),
+                    )
+                } else {
+                    Image(
+                        painter = painterResource(R.drawable.ic_logo),
+                        contentDescription = null,
+                        modifier = Modifier.size(36.dp),
+                    )
+                }
             }
             Spacer(Modifier.height(24.dp))
             Text(

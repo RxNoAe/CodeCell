@@ -9,6 +9,8 @@ import dev.codecell.app.data.AgentOption
 import dev.codecell.app.data.AppConfig
 import dev.codecell.app.data.Attachment
 import dev.codecell.app.data.ChatPart
+import dev.codecell.app.data.DriveSync
+import dev.codecell.app.data.GoogleProfile
 import dev.codecell.app.data.LocalServer
 import dev.codecell.app.data.ModelOption
 import dev.codecell.app.data.OpencodeClient
@@ -59,6 +61,12 @@ class AppState(context: Context) {
         private set
     var workspacePath by mutableStateOf(config.workspacePath)
     var userName by mutableStateOf(config.userName)
+    var googleSignedIn by mutableStateOf(config.googleSignedIn)
+        private set
+    var googleEmail by mutableStateOf(config.googleEmail)
+        private set
+    var googleAvatar by mutableStateOf(config.googleAvatar)
+        private set
     var model by mutableStateOf(config.model)
     var messages by mutableStateOf<List<ChatMessage>>(emptyList())
     var sessionId by mutableStateOf<String?>(null)
@@ -117,6 +125,70 @@ class AppState(context: Context) {
     fun saveSettings(name: String) {
         userName = name.trim()
         config.userName = userName
+    }
+
+    fun applyGoogleProfile(profile: GoogleProfile) {
+        googleSignedIn = true
+        googleEmail = profile.email
+        googleAvatar = profile.picture
+        config.googleSignedIn = true
+        config.googleEmail = profile.email
+        config.googleAvatar = profile.picture
+        if (profile.name.isNotBlank()) {
+            userName = profile.name
+            config.userName = profile.name
+        }
+    }
+
+    fun signOutGoogle() {
+        googleSignedIn = false
+        googleEmail = ""
+        googleAvatar = ""
+        config.googleSignedIn = false
+        config.googleEmail = ""
+        config.googleAvatar = ""
+    }
+
+    suspend fun backupSessions(token: String): String = withContext(Dispatchers.IO) {
+        val file = DriveSync.buildBackup(appContext, config)
+        DriveSync.upload(token, file)
+        config.lastBackup = System.currentTimeMillis()
+        val kb = (file.length() + 1023) / 1024
+        "Backed up $kb KB to Google Drive"
+    }
+
+    suspend fun restoreSessions(token: String): String {
+        val bytes = withContext(Dispatchers.IO) {
+            val latest = DriveSync.findLatest(token)
+                ?: throw IllegalStateException("No CodeCell backup was found in Google Drive.")
+            DriveSync.download(token, latest.id)
+        }
+        withContext(Dispatchers.Main) {
+            serverJob?.cancel()
+            serverJob = null
+            ServerService.stop(appContext)
+            serverPhase = ServerPhase.Stopped
+            serverStatus = "Restoring backup..."
+        }
+        withContext(Dispatchers.IO) {
+            delay(1200)
+            DriveSync.restore(appContext, config, bytes)
+        }
+        withContext(Dispatchers.Main) {
+            userName = config.userName
+            googleSignedIn = config.googleSignedIn
+            googleEmail = config.googleEmail
+            googleAvatar = config.googleAvatar
+            model = config.model
+            agentName = config.agentName
+            agentSystem = config.agentSystem
+            configuredProviders = config.configuredProviders
+            messages = emptyList()
+            sessionId = null
+            sessionTitle = "New chat"
+            revertMessageID = null
+        }
+        return "Restored your sessions from Google Drive"
     }
 
     fun ensureServer(scope: CoroutineScope) {

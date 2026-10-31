@@ -1,5 +1,6 @@
 package dev.codecell.app.ui
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -7,6 +8,7 @@ import android.os.PowerManager
 import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -65,13 +68,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.codecell.app.AppState
 import dev.codecell.app.ServerPhase
+import coil.compose.AsyncImage
 import dev.codecell.app.data.AgentOption
+import dev.codecell.app.data.GoogleAuth
+import dev.codecell.app.data.GoogleSignInCancelled
 import dev.codecell.app.data.ModelOption
 import dev.codecell.app.data.OpencodeClient
 import dev.codecell.app.data.ProviderAuthMethod
@@ -109,6 +116,98 @@ fun SettingsSheet(
         if (uri != null) state.attachFolder(uri, scope)
     }
 
+    val activity = context.findActivity()
+    var accountBusy by remember { mutableStateOf(false) }
+    var accountMessage by remember { mutableStateOf<String?>(null) }
+    var pendingDriveAction by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(state.userName) {
+        if (name != state.userName) name = state.userName
+    }
+
+    fun runDrive(action: String, token: String) {
+        scope.launch {
+            accountBusy = true
+            runCatching {
+                if (action == "backup") state.backupSessions(token)
+                else state.restoreSessions(token)
+            }.onSuccess { accountMessage = it }
+                .onFailure { accountMessage = it.message ?: "Google Drive request failed." }
+            if (action == "restore") {
+                state.refreshSessions(scope)
+                state.ensureServer(scope)
+            }
+            accountBusy = false
+        }
+    }
+
+    val driveAuthLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        val action = pendingDriveAction
+        pendingDriveAction = null
+        val intent = result.data
+        val token = if (result.resultCode == Activity.RESULT_OK && intent != null && activity != null) {
+            GoogleAuth.driveTokenFromIntent(activity, intent)
+        } else {
+            null
+        }
+        if (token == null || action == null) {
+            accountMessage = "Google Drive access was not granted."
+        } else {
+            runDrive(action, token)
+        }
+    }
+
+    fun startDrive(action: String) {
+        val act = activity
+        if (act == null) {
+            accountMessage = "Google Drive needs a foreground screen."
+            return
+        }
+        if (!GoogleAuth.isConfigured()) {
+            accountMessage = "Google sign-in isn't configured for this build."
+            return
+        }
+        pendingDriveAction = action
+        GoogleAuth.requestDriveToken(
+            act,
+            onToken = { token -> runDrive(action, token) },
+            onResolution = { pending ->
+                driveAuthLauncher.launch(
+                    IntentSenderRequest.Builder(pending.intentSender).build(),
+                )
+            },
+            onError = { accountMessage = it.message ?: "Google Drive request failed." },
+        )
+    }
+
+    fun signInWithGoogle() {
+        val act = activity
+        if (act == null) {
+            accountMessage = "Sign-in needs a foreground screen."
+            return
+        }
+        if (!GoogleAuth.isConfigured()) {
+            accountMessage = "Google sign-in isn't configured for this build."
+            return
+        }
+        scope.launch {
+            accountBusy = true
+            runCatching { GoogleAuth.signIn(act) }
+                .onSuccess {
+                    state.applyGoogleProfile(it)
+                    name = it.name
+                    accountMessage = "Signed in as ${it.email}"
+                }
+                .onFailure {
+                    accountMessage = if (it is GoogleSignInCancelled) null
+                    else it.message ?: "Sign-in failed."
+                }
+            accountBusy = false
+        }
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -133,6 +232,116 @@ fun SettingsSheet(
                 colors = fieldColors(),
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            Text("ACCOUNT", style = MaterialTheme.typography.labelSmall, color = Cs.Dim)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Cs.Input.copy(alpha = 0.45f))
+                    .border(1.dp, Cs.LineSoft, RoundedCornerShape(16.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (state.googleSignedIn) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        GoogleAvatar(state.googleAvatar, state.userName, 44)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = state.userName.ifBlank { "Google account" },
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Cs.Text,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = state.googleEmail.ifBlank { "Signed in" },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Cs.Muted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        TextButton(onClick = {
+                            scope.launch {
+                                GoogleAuth.signOut(context)
+                                state.signOutGoogle()
+                                accountMessage = "Signed out"
+                            }
+                        }) { Text("Sign out") }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(
+                            onClick = { startDrive("backup") },
+                            enabled = !accountBusy,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Back up") }
+                        OutlinedButton(
+                            onClick = { startDrive("restore") },
+                            enabled = !accountBusy,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Restore") }
+                    }
+                    Text(
+                        "Sessions are stored in this app's hidden Google Drive folder.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Cs.Dim,
+                    )
+                } else {
+                    Text(
+                        "Sign in to use your Google name and photo, and back up sessions to Google Drive.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Cs.Muted,
+                    )
+                    Button(
+                        onClick = { signInWithGoogle() },
+                        enabled = !accountBusy,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (accountBusy) "Connecting…" else "Sign in with Google")
+                    }
+                    if (!GoogleAuth.isConfigured()) {
+                        Text(
+                            "Google sign-in isn't configured in this build.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Cs.Warn,
+                        )
+                    }
+                }
+                if (accountBusy) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(15.dp),
+                            strokeWidth = 1.5.dp,
+                            color = Cs.Muted,
+                        )
+                        Text(
+                            "Working with Google Drive…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Cs.Muted,
+                        )
+                    }
+                }
+                accountMessage?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (message.contains("fail", true) ||
+                            message.contains("not ", true) ||
+                            message.contains("isn't", true)
+                        ) Cs.Warn else Cs.Success,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
 
             Text("PROVIDERS", style = MaterialTheme.typography.labelSmall, color = Cs.Dim)
             val cardShape = RoundedCornerShape(16.dp)
@@ -1663,3 +1872,41 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
 private fun isBatteryUnrestricted(context: Context): Boolean =
     context.getSystemService(PowerManager::class.java)
         ?.isIgnoringBatteryOptimizations(context.packageName) == true
+
+@Composable
+private fun GoogleAvatar(url: String, name: String, size: Int) {
+    if (url.isNotBlank()) {
+        AsyncImage(
+            model = url,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(size.dp)
+                .clip(CircleShape)
+                .background(Cs.Input),
+        )
+    } else {
+        Box(
+            Modifier
+                .size(size.dp)
+                .clip(CircleShape)
+                .background(Cs.Input),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = name.trim().take(1).uppercase().ifBlank { "?" },
+                style = MaterialTheme.typography.titleMedium,
+                color = Cs.Text,
+            )
+        }
+    }
+}
+
+private fun Context.findActivity(): Activity? {
+    var current: Context = this
+    while (current is android.content.ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
+}

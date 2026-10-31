@@ -51,6 +51,22 @@ class AppConfig(context: Context) {
         get() = prefs.getString(KEY_NAME, "") ?: ""
         set(value) = prefs.edit().putString(KEY_NAME, value).apply()
 
+    var googleSignedIn: Boolean
+        get() = prefs.getBoolean(KEY_GOOGLE_SIGNED, false)
+        set(value) = prefs.edit().putBoolean(KEY_GOOGLE_SIGNED, value).apply()
+
+    var googleEmail: String
+        get() = prefs.getString(KEY_GOOGLE_EMAIL, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_GOOGLE_EMAIL, value).apply()
+
+    var googleAvatar: String
+        get() = prefs.getString(KEY_GOOGLE_AVATAR, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_GOOGLE_AVATAR, value).apply()
+
+    var lastBackup: Long
+        get() = prefs.getLong(KEY_LAST_BACKUP, 0L)
+        set(value) = prefs.edit().putLong(KEY_LAST_BACKUP, value).apply()
+
     var serverPassword: String
         get() = prefs.getString(KEY_PASSWORD, null)?.takeIf { it.isNotBlank() }
             ?: newPassword().also { prefs.edit().putString(KEY_PASSWORD, it).apply() }
@@ -131,6 +147,10 @@ class AppConfig(context: Context) {
         private const val KEY_PASSWORD = "server_password"
         private const val KEY_WORKSPACE = "workspace_path"
         private const val KEY_NAME = "user_name"
+        private const val KEY_GOOGLE_SIGNED = "google_signed_in"
+        private const val KEY_GOOGLE_EMAIL = "google_email"
+        private const val KEY_GOOGLE_AVATAR = "google_avatar"
+        private const val KEY_LAST_BACKUP = "last_backup"
         private const val KEY_TREE = "tree_uri"
         private const val KEY_PROMPTED = "folder_prompted"
         private const val KEY_BATTERY_ASKED = "battery_asked"

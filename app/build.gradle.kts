@@ -25,6 +25,11 @@ android {
         targetSdk = 34
         versionCode = (System.getenv("CODECELL_VERSION_CODE") ?: "1").toIntOrNull() ?: 1
         versionName = System.getenv("CODECELL_VERSION_NAME") ?: "1.0"
+        buildConfigField(
+            "String",
+            "GOOGLE_WEB_CLIENT_ID",
+            "\"${System.getenv("GOOGLE_WEB_CLIENT_ID") ?: ""}\"",
+        )
 
         ndk {
             abiFilters += "arm64-v8a"
@@ -56,6 +61,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -78,6 +84,13 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended:1.7.6")
+
+    // Sign in with Google + Drive app-data backup.
+    implementation("androidx.credentials:credentials:1.6.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.2.1")
+    implementation("com.google.android.gms:play-services-auth:22.0.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
