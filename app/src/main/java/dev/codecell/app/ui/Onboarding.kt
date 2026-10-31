@@ -1,6 +1,7 @@
 package dev.codecell.app.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -10,6 +11,12 @@ import android.os.Environment
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -68,7 +75,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,6 +86,8 @@ import androidx.core.content.ContextCompat
 import dev.codecell.app.AppState
 import dev.codecell.app.R
 import dev.codecell.app.ServerPhase
+import dev.codecell.app.data.GoogleAuth
+import dev.codecell.app.data.GoogleSignInCancelled
 import dev.codecell.app.data.OpencodeClient
 import dev.codecell.app.data.ProviderAuthMethod
 import dev.codecell.app.data.ProviderCatalog
@@ -98,65 +109,67 @@ fun OnboardingScreen(state: AppState, scope: CoroutineScope) {
     var fileAccess by remember { mutableStateOf(hasFileAccess(context)) }
 
     Surface(Modifier.fillMaxSize(), color = Cs.Bg) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Cs.PageGradient),
-        ) {
-            Column(
+        if (page == 0) {
+            WelcomeLogin(state = state, scope = scope, onContinue = { page = 1 })
+        } else {
+            Box(
                 Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 22.dp, vertical = 16.dp),
+                    .background(Cs.PageGradient),
             ) {
-                OnboardingHeader(page)
-                Spacer(Modifier.height(22.dp))
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                    when (page) {
-                        0 -> ProviderSetup(state = state, scope = scope)
-                        1 -> FolderSetup(
-                            state = state,
-                            scope = scope,
-                            hasAccess = fileAccess,
-                            onAccessChanged = { fileAccess = it },
-                        )
-                        else -> LinuxSetup(
-                            installed = linuxInstalled,
-                            busy = linuxBusy,
-                            progress = linuxProgress,
-                            error = linuxError,
-                            onInstall = {
-                                if (!linuxBusy && !linuxInstalled) {
-                                    linuxBusy = true
-                                    linuxError = null
-                                    linuxProgress = 0f
-                                    scope.launch {
-                                        val result = withContext(Dispatchers.IO) {
-                                            runCatching {
-                                                TermuxEnvironment.install(context) { progress ->
-                                                    linuxProgress = progress
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 22.dp, vertical = 16.dp),
+                ) {
+                    OnboardingHeader(page)
+                    Spacer(Modifier.height(22.dp))
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        when (page) {
+                            1 -> ProviderSetup(state = state, scope = scope)
+                            2 -> FolderSetup(
+                                state = state,
+                                scope = scope,
+                                hasAccess = fileAccess,
+                                onAccessChanged = { fileAccess = it },
+                            )
+                            else -> LinuxSetup(
+                                installed = linuxInstalled,
+                                busy = linuxBusy,
+                                progress = linuxProgress,
+                                error = linuxError,
+                                onInstall = {
+                                    if (!linuxBusy && !linuxInstalled) {
+                                        linuxBusy = true
+                                        linuxError = null
+                                        linuxProgress = 0f
+                                        scope.launch {
+                                            val result = withContext(Dispatchers.IO) {
+                                                runCatching {
+                                                    TermuxEnvironment.install(context) { progress ->
+                                                        linuxProgress = progress
+                                                    }
                                                 }
                                             }
+                                            result.onSuccess {
+                                                linuxInstalled = true
+                                                state.restartServer(scope)
+                                            }.onFailure {
+                                                linuxError = it.message
+                                                    ?: "Could not install the Linux files"
+                                            }
+                                            linuxBusy = false
                                         }
-                                        result.onSuccess {
-                                            linuxInstalled = true
-                                            state.restartServer(scope)
-                                        }.onFailure {
-                                            linuxError = it.message
-                                                ?: "Could not install the Linux files"
-                                        }
-                                        linuxBusy = false
                                     }
-                                }
-                            },
-                        )
+                                },
+                            )
+                        }
                     }
-                }
-                Spacer(Modifier.height(14.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (page > 0) {
-                        val canGoBack = !(page == 2 && linuxBusy)
+                    Spacer(Modifier.height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val canGoBack = !(page == 3 && linuxBusy)
                         TextButton(
                             onClick = { page -= 1 },
                             enabled = canGoBack,
@@ -171,36 +184,239 @@ fun OnboardingScreen(state: AppState, scope: CoroutineScope) {
                             Text("Back", color = if (canGoBack) Cs.Muted else Cs.Dim)
                         }
                         Spacer(Modifier.width(8.dp))
-                    }
-                    Text(
-                        text = "STEP ${page + 1} OF 3",
-                        color = Cs.Dim,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    when (page) {
-                        0 -> OnboardingAction(
-                            label = "Next",
-                            enabled = state.configuredProviders.isNotEmpty(),
-                            onClick = { page = 1 },
+                        Text(
+                            text = "STEP $page OF 3",
+                            color = Cs.Dim,
+                            style = MaterialTheme.typography.labelSmall,
                         )
+                        Spacer(Modifier.weight(1f))
+                        when (page) {
+                            1 -> OnboardingAction(
+                                label = "Next",
+                                enabled = state.configuredProviders.isNotEmpty(),
+                                onClick = { page = 2 },
+                            )
 
-                        1 -> OnboardingAction(
-                            label = "Next",
-                            enabled = state.hasFolder && fileAccess,
-                            onClick = { page = 2 },
-                        )
+                            2 -> OnboardingAction(
+                                label = "Next",
+                                enabled = state.hasFolder && fileAccess,
+                                onClick = { page = 3 },
+                            )
 
-                        else -> OnboardingAction(
-                            label = "Start chatting",
-                            enabled = linuxInstalled,
-                            onClick = { state.completeOnboarding() },
-                        )
+                            else -> OnboardingAction(
+                                label = "Start chatting",
+                                enabled = linuxInstalled,
+                                onClick = { state.completeOnboarding() },
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun WelcomeLogin(
+    state: AppState,
+    scope: CoroutineScope,
+    onContinue: () -> Unit,
+) {
+    val context = LocalContext.current
+    val activity = context.findActivity()
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    val transition = rememberInfiniteTransition(label = "welcome")
+    val scale by transition.animateFloat(
+        initialValue = 0.96f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "logoScale",
+    )
+    val glow by transition.animateFloat(
+        initialValue = 0.16f,
+        targetValue = 0.4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "logoGlow",
+    )
+    val drift by transition.animateFloat(
+        initialValue = -5f,
+        targetValue = 5f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "logoDrift",
+    )
+
+    fun signIn() {
+        val act = activity
+        if (act == null) {
+            message = "Sign-in needs a foreground screen."
+            return
+        }
+        if (!GoogleAuth.isConfigured()) {
+            message = "Google sign-in isn't configured in this build. Continue without Google for now."
+            return
+        }
+        scope.launch {
+            busy = true
+            message = null
+            runCatching { GoogleAuth.signIn(act) }
+                .onSuccess {
+                    state.applyGoogleProfile(it)
+                    busy = false
+                    onContinue()
+                }
+                .onFailure {
+                    busy = false
+                    if (it !is GoogleSignInCancelled) {
+                        message = it.message ?: "Sign-in failed."
+                    }
+                }
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cs.PageGradient)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 24.dp, vertical = 22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.weight(1f))
+        Box(
+            Modifier.graphicsLayer { translationY = drift },
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .size(230.dp)
+                    .graphicsLayer { alpha = glow }
+                    .background(
+                        Brush.radialGradient(
+                            listOf(Color.White.copy(alpha = 0.20f), Color.Transparent),
+                        ),
+                        CircleShape,
+                    ),
+            )
+            Box(
+                Modifier
+                    .size(116.dp)
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(
+                        Brush.verticalGradient(listOf(Color(0xFF202027), Color(0xFF111115))),
+                    )
+                    .border(1.dp, Cs.Line, RoundedCornerShape(32.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.ic_logo),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(66.dp)
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        },
+                )
+            }
+        }
+        Spacer(Modifier.height(30.dp))
+        Text(
+            text = "CodeCell",
+            style = MaterialTheme.typography.headlineLarge,
+            color = Cs.Text,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Your pocket coding agent",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Cs.Muted,
+        )
+        Spacer(Modifier.weight(1.15f))
+
+        message?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = Cs.Warn,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+        }
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color.White)
+                .clickable(enabled = !busy) { signIn() },
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (busy) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = Color(0xFF111113),
+                )
+            } else {
+                Image(
+                    painter = painterResource(R.drawable.ic_google_g),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "Continue with Google",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Color(0xFF111113),
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .border(1.dp, Cs.Line, RoundedCornerShape(28.dp))
+                .clickable(enabled = !busy) { onContinue() },
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Continue without Google",
+                style = MaterialTheme.typography.titleSmall,
+                color = Cs.Text,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "You can sign in later in Settings.",
+            style = MaterialTheme.typography.labelSmall,
+            color = Cs.Dim,
+        )
+    }
+}
+
+private fun Context.findActivity(): Activity? {
+    var current: Context = this
+    while (current is android.content.ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
 }
 
 @Composable
@@ -248,8 +464,8 @@ private fun OnboardingHeader(page: Int) {
             Text("CodeCell", style = MaterialTheme.typography.titleLarge, color = Cs.Text)
             Text(
                 text = when (page) {
-                    0 -> "Connect your AI provider"
-                    1 -> "Choose your workspace"
+                    1 -> "Connect your AI provider"
+                    2 -> "Choose your workspace"
                     else -> "Install Linux tools"
                 },
                 style = MaterialTheme.typography.bodySmall,
@@ -260,9 +476,9 @@ private fun OnboardingHeader(page: Int) {
             repeat(3) { index ->
                 Box(
                     Modifier
-                        .size(width = if (index == page) 20.dp else 7.dp, height = 7.dp)
+                        .size(width = if (index == page - 1) 20.dp else 7.dp, height = 7.dp)
                         .clip(CircleShape)
-                        .background(if (index == page) Cs.Text else Cs.Line),
+                        .background(if (index == page - 1) Cs.Text else Cs.Line),
                 )
             }
         }
