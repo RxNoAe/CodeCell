@@ -1,0 +1,25 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Subtle lower inner tone from the opencode mark. -->
+    <path android:pathData="M44,49H64V69H44Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="49"
+                android:endX="0"
+                android:endY="69"
+                android:startColor="#FF5A5858"
+                android:endColor="#FF333031" />
+        </aapt:attr>
+    </path>
+    <!-- Open block "O": one clean silhouette, transparent core. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M34,29H74V79H34Z M44,39H64V69H44Z" />
+</vector>
