@@ -92,6 +92,9 @@ jobs:
           ls -lh app/src/main/jniLibs/arm64-v8a/libcodecell-shell.so
 
       - name: Build debug APK
+        env:
+          CODECELL_VERSION_CODE: ${{ github.run_number }}
+          CODECELL_VERSION_NAME: 1.0.${{ github.run_number }}
         run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Name APK for release

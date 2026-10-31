@@ -7,12 +7,24 @@ android {
     namespace = "dev.codecell.app"
     compileSdk = 36
 
+    // A committed debug key so every CI build shares one signature. Without
+    // this, fresh GitHub runners generate a new debug keystore each build and
+    // Android refuses to install the update over the previous APK.
+    signingConfigs {
+        create("stable") {
+            storeFile = rootProject.file("keystore/codecell-debug.jks")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "dev.codecell.app"
         minSdk = 28
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = (System.getenv("CODECELL_VERSION_CODE") ?: "1").toIntOrNull() ?: 1
+        versionName = System.getenv("CODECELL_VERSION_NAME") ?: "1.0"
 
         ndk {
             abiFilters += "arm64-v8a"
@@ -27,9 +39,13 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("stable")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("stable")
         }
     }
 
