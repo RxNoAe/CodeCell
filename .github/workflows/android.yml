@@ -29,8 +29,8 @@ jobs:
 
       - name: Fetch opencode runtime
         env:
-          OPENCODE_VERSION: "2.2.5"
-          OPENCODE_DEB_SHA256: "d95cecded6126b434ec57c2ab04f3d8f3c041fbf32cc97cbdbf93011ae888d39"
+          OPENCODE_VERSION: "1.19.4"
+          OPENCODE_DEB_SHA256: "7ad3b52f3568d668d7187bcafc5eb2039375de0698b6e533c48424897e42af02"
         run: |
           set -euo pipefail
           DEB="opencode_${OPENCODE_VERSION}_aarch64.deb"
