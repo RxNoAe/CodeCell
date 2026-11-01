@@ -133,7 +133,6 @@ fun SettingsSheet(
             }.onSuccess { accountMessage = it }
                 .onFailure { accountMessage = it.message ?: "Google Drive request failed." }
             if (action == "restore") {
-                state.refreshSessions(scope)
                 state.ensureServer(scope)
             }
             accountBusy = false

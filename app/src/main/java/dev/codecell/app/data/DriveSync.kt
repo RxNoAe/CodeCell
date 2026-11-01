@@ -90,9 +90,7 @@ object DriveSync {
         }
     }
 
-    fun findLatest(token: String): BackupInfo? = runCatching { listAll(token) }
-        .getOrDefault(emptyList())
-        .firstOrNull()
+    fun findLatest(token: String): BackupInfo? = listAll(token).firstOrNull()
 
     fun download(token: String, id: String): ByteArray {
         val connection = open("$API/drive/v3/files/$id?alt=media", token)
@@ -149,7 +147,7 @@ object DriveSync {
     private fun listAll(token: String): List<BackupInfo> {
         val connection = open(
             "$API/drive/v3/files?spaces=appDataFolder" +
-                "&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=100",
+                "&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=100",
             token,
         )
         try {

@@ -171,7 +171,7 @@ class AppState(context: Context) {
             serverStatus = "Restoring backup..."
         }
         withContext(Dispatchers.IO) {
-            delay(1200)
+            delay(2000)
             DriveSync.restore(appContext, config, bytes)
         }
         withContext(Dispatchers.Main) {
