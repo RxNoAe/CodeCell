@@ -321,7 +321,7 @@ fun SettingsSheet(
                     value = clientId,
                     onValueChange = {
                         clientId = it
-                        state.setGoogleWebClientId(it)
+                        state.updateGoogleWebClientId(it)
                     },
                     label = { Text("Google Web Client ID") },
                     singleLine = true,

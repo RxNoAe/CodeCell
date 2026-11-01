@@ -131,7 +131,7 @@ class AppState(context: Context) {
         config.userName = userName
     }
 
-    fun setGoogleWebClientId(value: String) {
+    fun updateGoogleWebClientId(value: String) {
         val trimmed = value.trim()
         googleWebClientId = trimmed
         config.googleWebClientId = trimmed
