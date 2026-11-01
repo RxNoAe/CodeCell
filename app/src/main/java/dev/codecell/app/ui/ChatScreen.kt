@@ -359,7 +359,7 @@ fun CodeCellApp(state: AppState) {
                                     .align(Alignment.BottomStart)
                                     .padding(start = 16.dp, bottom = 10.dp),
                                 onClick = {
-                                    val typing = if (state.sending && state.liveMessageId == null) 1 else 0
+                                    val typing = if (state.sending) 1 else 0
                                     scope.launch {
                                         messageListState.animateScrollToItem(
                                             state.messages.size + typing
@@ -1117,7 +1117,7 @@ private fun MessageList(
     onSearch: () -> Unit,
     onRevert: (ChatMessage) -> Unit,
 ) {
-    val showTyping = state.sending && state.liveMessageId == null
+    val showTyping = state.sending
     val anchorIndex = state.messages.size + if (showTyping) 1 else 0
     val atBottom by remember(listState) {
         derivedStateOf {
@@ -1709,7 +1709,23 @@ private fun StaticIcon(icon: ImageVector) {
 @Composable
 private fun TypingRow() {
     val transition = rememberInfiniteTransition(label = "typing")
+    val pulse by transition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "brainPulse",
+    )
     Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = Icons.Filled.Psychology,
+            contentDescription = null,
+            tint = Cs.Reasoning.copy(alpha = pulse),
+            modifier = Modifier.size(15.dp),
+        )
+        Spacer(Modifier.size(8.dp))
         Text(
             "Thinking",
             color = Cs.Muted,
