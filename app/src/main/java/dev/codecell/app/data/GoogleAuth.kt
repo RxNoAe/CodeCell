@@ -38,11 +38,7 @@ object GoogleAuth {
 
     private val driveScope = Scope(DRIVE_APPDATA)
 
-    @Volatile
-    var configuredClientId: String = ""
-
-    fun webClientId(): String =
-        configuredClientId.takeIf { it.isNotBlank() } ?: BuildConfig.GOOGLE_WEB_CLIENT_ID
+    fun webClientId(): String = BuildConfig.GOOGLE_WEB_CLIENT_ID
 
     fun isConfigured(): Boolean = webClientId().isNotBlank()
 
