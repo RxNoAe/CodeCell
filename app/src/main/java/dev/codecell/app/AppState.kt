@@ -10,6 +10,7 @@ import dev.codecell.app.data.AppConfig
 import dev.codecell.app.data.Attachment
 import dev.codecell.app.data.ChatPart
 import dev.codecell.app.data.DriveSync
+import dev.codecell.app.data.GoogleAuth
 import dev.codecell.app.data.GoogleProfile
 import dev.codecell.app.data.LocalServer
 import dev.codecell.app.data.ModelOption
@@ -67,6 +68,8 @@ class AppState(context: Context) {
         private set
     var googleAvatar by mutableStateOf(config.googleAvatar)
         private set
+    var googleWebClientId by mutableStateOf(config.googleWebClientId)
+        private set
     var model by mutableStateOf(config.model)
     var messages by mutableStateOf<List<ChatMessage>>(emptyList())
     var sessionId by mutableStateOf<String?>(null)
@@ -105,6 +108,7 @@ class AppState(context: Context) {
 
     init {
         config.serverUrl = AppConfig.DEFAULT_SERVER
+        GoogleAuth.configuredClientId = config.googleWebClientId
         vault.workspacePath()?.let { selected ->
             config.workspacePath = selected
             workspacePath = selected
@@ -125,6 +129,13 @@ class AppState(context: Context) {
     fun saveSettings(name: String) {
         userName = name.trim()
         config.userName = userName
+    }
+
+    fun setGoogleWebClientId(value: String) {
+        val trimmed = value.trim()
+        googleWebClientId = trimmed
+        config.googleWebClientId = trimmed
+        GoogleAuth.configuredClientId = trimmed
     }
 
     fun applyGoogleProfile(profile: GoogleProfile) {

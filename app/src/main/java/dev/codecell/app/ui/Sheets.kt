@@ -120,6 +120,11 @@ fun SettingsSheet(
     var accountBusy by remember { mutableStateOf(false) }
     var accountMessage by remember { mutableStateOf<String?>(null) }
     var pendingDriveAction by remember { mutableStateOf<String?>(null) }
+    var clientId by remember { mutableStateOf(state.googleWebClientId) }
+
+    LaunchedEffect(state.googleWebClientId) {
+        if (clientId != state.googleWebClientId) clientId = state.googleWebClientId
+    }
 
     LaunchedEffect(state.userName) {
         if (name != state.userName) name = state.userName
@@ -312,6 +317,23 @@ fun SettingsSheet(
                         )
                     }
                 }
+                OutlinedTextField(
+                    value = clientId,
+                    onValueChange = {
+                        clientId = it
+                        state.setGoogleWebClientId(it)
+                    },
+                    label = { Text("Google Web Client ID") },
+                    singleLine = true,
+                    colors = fieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Paste the Web application client ID from Google Cloud. " +
+                        "Required for Google sign-in and Drive backup.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Cs.Dim,
+                )
                 if (accountBusy) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
