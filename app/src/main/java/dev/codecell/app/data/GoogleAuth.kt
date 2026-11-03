@@ -65,7 +65,8 @@ object GoogleAuth {
         )
         var lastError: GetCredentialException? = null
         var sawNoCredential = false
-        repeat(2) {
+        var attempt = 0
+        while (attempt < 2) {
             for (option in options) {
                 val request = GetCredentialRequest.Builder()
                     .addCredentialOption(option)
@@ -82,6 +83,7 @@ object GoogleAuth {
                 }
             }
             if (!sawNoCredential) break
+            attempt++
         }
         throw IllegalStateException(lastError?.message ?: "Google sign-in failed.", lastError)
     }
