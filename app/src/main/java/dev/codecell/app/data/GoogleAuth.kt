@@ -7,14 +7,18 @@ import android.content.Intent
 import android.util.Base64
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
+import androidx.credentials.CredentialOption
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
+import androidx.credentials.GetCredentialResponse
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.Scope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import dev.codecell.app.BuildConfig
 import org.json.JSONObject
@@ -48,21 +52,41 @@ object GoogleAuth {
             throw IllegalStateException("Google sign-in is not configured for this build.")
         }
         val manager = CredentialManager.create(activity)
-        val option = GetGoogleIdOption.Builder()
-            .setFilterByAuthorizedAccounts(false)
-            .setServerClientId(clientId)
-            .setAutoSelectEnabled(false)
-            .build()
-        val request = GetCredentialRequest.Builder()
-            .addCredentialOption(option)
-            .build()
-        val result = try {
-            manager.getCredential(request = request, context = activity)
-        } catch (e: GetCredentialCancellationException) {
-            throw GoogleSignInCancelled()
-        } catch (e: GetCredentialException) {
-            throw IllegalStateException(e.message ?: "Google sign-in failed.", e)
+        // The bottom-sheet option can report NoCredentialException on the very
+        // first attempt, before any account is authorized. Retry, then fall
+        // back to the explicit "Sign in with Google" button flow.
+        val options = listOf<CredentialOption>(
+            GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(false)
+                .setServerClientId(clientId)
+                .setAutoSelectEnabled(false)
+                .build(),
+            GetSignInWithGoogleOption.Builder(clientId).build(),
+        )
+        var lastError: GetCredentialException? = null
+        var sawNoCredential = false
+        repeat(2) {
+            for (option in options) {
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(option)
+                    .build()
+                try {
+                    return profileFrom(manager.getCredential(request = request, context = activity))
+                } catch (e: GetCredentialCancellationException) {
+                    throw GoogleSignInCancelled()
+                } catch (e: NoCredentialException) {
+                    lastError = e
+                    sawNoCredential = true
+                } catch (e: GetCredentialException) {
+                    throw IllegalStateException(e.message ?: "Google sign-in failed.", e)
+                }
+            }
+            if (!sawNoCredential) break
         }
+        throw IllegalStateException(lastError?.message ?: "Google sign-in failed.", lastError)
+    }
+
+    private fun profileFrom(result: GetCredentialResponse): GoogleProfile {
         val credential = result.credential
         if (credential !is CustomCredential ||
             credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
