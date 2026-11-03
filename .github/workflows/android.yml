@@ -53,8 +53,16 @@ jobs:
             curl -fsSL "$1" -o "$2"
             echo "$3  $2" | sha256sum -c -
           }
-          fetch "$BASE/p/proot/proot_5.1.107.101_aarch64.deb" proot.deb \
-            "a28355e9be257e1f87f4e9294b3118470d4fd7a5442fed8b278f4443c83407d7"
+          PROOT_DEB="proot_5.1.107.102_aarch64.deb"
+          PROOT_SHA="10a394b585c2fc2b2c8502544f4e5f1be581dc8bfff79e8ba62f16207423e030"
+          if curl -fsSL "$BASE/p/proot/$PROOT_DEB" -o proot.deb; then
+            echo "$PROOT_SHA  proot.deb" | sha256sum -c -
+          else
+            # Termux rotates proot versions; fall back to the newest available.
+            PROOT_DEB=$(curl -fsSL "$BASE/p/proot/" | grep -oE 'proot_[0-9.]+_aarch64\.deb' | sort -V | tail -1)
+            echo "::warning::pinned proot missing, using $PROOT_DEB"
+            curl -fsSL "$BASE/p/proot/$PROOT_DEB" -o proot.deb
+          fi
           fetch "$BASE/libt/libtalloc/libtalloc_2.5.0_aarch64.deb" libtalloc.deb \
             "556591f43bb773ad8777e1a29522640866a55f95dab71914418b94a8c58ad5a7"
           fetch "$BASE/liba/libandroid-shmem/libandroid-shmem_0.7_aarch64.deb" libandroid-shmem.deb \
