@@ -42,11 +42,15 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -67,7 +71,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -213,6 +219,7 @@ fun SettingsSheet(
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         dragHandle = { SheetHandle() },
     ) {
+        val cardBrush = Brush.verticalGradient(listOf(Color(0xFF17171D), Color(0xFF121217)))
         Column(
             Modifier
                 .fillMaxWidth()
@@ -231,12 +238,12 @@ fun SettingsSheet(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Text("ACCOUNT", style = MaterialTheme.typography.labelSmall, color = Cs.Dim)
+            SettingsSectionHeader("ACCOUNT", Icons.Filled.Person)
             Column(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Cs.Input.copy(alpha = 0.45f))
+                    .background(cardBrush)
                     .border(1.dp, Cs.LineSoft, RoundedCornerShape(16.dp))
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -341,13 +348,13 @@ fun SettingsSheet(
                 }
             }
 
-            Text("PROVIDERS", style = MaterialTheme.typography.labelSmall, color = Cs.Dim)
+            SettingsSectionHeader("PROVIDERS", Icons.Filled.Key)
             val cardShape = RoundedCornerShape(16.dp)
             Row(
                 Modifier
                     .fillMaxWidth()
                     .clip(cardShape)
-                    .background(Cs.Input.copy(alpha = 0.45f))
+                    .background(cardBrush)
                     .border(1.dp, Cs.LineSoft, cardShape)
                     .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -366,12 +373,12 @@ fun SettingsSheet(
                 }
             }
 
-            Text("EMBEDDED SERVER", style = MaterialTheme.typography.labelSmall, color = Cs.Dim)
+            SettingsSectionHeader("EMBEDDED SERVER", Icons.Filled.Storage)
             Column(
                 Modifier
                     .fillMaxWidth()
                     .clip(cardShape)
-                    .background(Cs.Input.copy(alpha = 0.45f))
+                    .background(cardBrush)
                     .border(1.dp, Cs.LineSoft, cardShape)
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -468,12 +475,12 @@ fun SettingsSheet(
                     }
                 }
             }
-            Text("LINUX ENVIRONMENT", style = MaterialTheme.typography.labelSmall, color = Cs.Dim)
+            SettingsSectionHeader("LINUX ENVIRONMENT", Icons.Filled.Terminal)
             Column(
                 Modifier
                     .fillMaxWidth()
                     .clip(cardShape)
-                    .background(Cs.Input.copy(alpha = 0.45f))
+                    .background(cardBrush)
                     .border(1.dp, Cs.LineSoft, cardShape)
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1841,6 +1848,29 @@ fun RenameSessionDialog(
             }
         },
     )
+}
+
+@Composable
+private fun SettingsSectionHeader(label: String, icon: ImageVector) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = Cs.Muted,
+            modifier = Modifier.size(13.dp),
+        )
+        Spacer(Modifier.width(7.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = Cs.Dim)
+        Spacer(Modifier.width(10.dp))
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            thickness = 0.5.dp,
+            color = Cs.LineSoft,
+        )
+    }
 }
 
 @Composable
