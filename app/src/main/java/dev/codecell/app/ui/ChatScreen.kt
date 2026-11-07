@@ -94,6 +94,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -142,6 +143,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.codecell.app.AppState
+import dev.codecell.app.BuildConfig
 import dev.codecell.app.ChatMessage
 import dev.codecell.app.R
 import dev.codecell.app.Role
@@ -260,10 +262,21 @@ fun CodeCellApp(state: AppState) {
             drawerContent = {
                 ModalDrawerSheet(
                     modifier = Modifier.width(312.dp),
-                    drawerContainerColor = Cs.Sheet,
+                    drawerContainerColor = Color.Transparent,
                     drawerContentColor = Cs.Text,
                 ) {
-                    DrawerContent(
+                    Column(
+                        Modifier
+                            .fillMaxHeight()
+                            .background(
+                                Brush.verticalGradient(
+                                    0f to Color(0xFF191922),
+                                    0.16f to Color(0xFF121217),
+                                    1f to Color(0xFF0C0C10),
+                                ),
+                            ),
+                    ) {
+                        DrawerContent(
                         state = state,
                         onClose = { scope.launch { drawerState.close() } },
                         onNewChat = {
@@ -294,6 +307,7 @@ fun CodeCellApp(state: AppState) {
                             scope.launch { drawerState.close() }
                         },
                     )
+                    }
                 }
             },
         ) {
@@ -737,18 +751,38 @@ private fun DrawerContent(
             )
         }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(20.dp))
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 12.dp, end = 4.dp, bottom = 8.dp),
+                .padding(start = 12.dp, end = 4.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = if (showArchived) "ARCHIVED" else "RECENT",
                 style = MaterialTheme.typography.labelSmall,
                 color = Cs.Dim,
+            )
+            if (active.isNotEmpty() || archived.isNotEmpty()) {
+                Spacer(Modifier.size(7.dp))
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(0x14FFFFFF))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = (if (showArchived) archived else active).size.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Cs.Dim,
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            HorizontalDivider(
                 modifier = Modifier.weight(1f),
+                thickness = 0.5.dp,
+                color = Cs.LineSoft,
             )
             if (showArchived || archived.isNotEmpty()) {
                 TextButton(
@@ -784,7 +818,11 @@ private fun DrawerContent(
                     modifier = Modifier.padding(start = 12.dp, top = 4.dp),
                 )
 
-                else -> LazyColumn(Modifier.fillMaxSize()) {
+                else -> LazyColumn(
+                    Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = PaddingValues(vertical = 2.dp),
+                ) {
                     items(visible, key = { it.id }) { session ->
                         SessionRow(
                             session = session,
@@ -803,27 +841,37 @@ private fun DrawerContent(
         }
 
         Spacer(Modifier.height(4.dp))
+        HorizontalDivider(thickness = 0.5.dp, color = Cs.LineSoft)
+        Spacer(Modifier.height(8.dp))
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 4.dp, bottom = 6.dp),
+                .clip(RoundedCornerShape(13.dp))
+                .background(Color(0x0DFFFFFF))
+                .clickable(onClick = onSettings)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(
-                onClick = onSettings,
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(Cs.Input.copy(alpha = 0.45f)),
-            ) {
-                Icon(
-                    Icons.Filled.Settings,
-                    contentDescription = "Settings",
-                    tint = Cs.Muted,
-                    modifier = Modifier.size(19.dp),
-                )
-            }
+            Icon(
+                Icons.Filled.Settings,
+                contentDescription = null,
+                tint = Cs.Muted,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.size(11.dp))
+            Text(
+                text = "Settings",
+                color = Cs.Body,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "v" + BuildConfig.VERSION_NAME,
+                style = MaterialTheme.typography.labelSmall,
+                color = Cs.Dim,
+            )
         }
+        Spacer(Modifier.height(6.dp))
     }
 }
 
@@ -841,19 +889,29 @@ private fun SessionRow(
     onDelete: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
+    val rowShape = RoundedCornerShape(13.dp)
 
     Box {
         Row(
             Modifier
                 .fillMaxWidth()
                 .padding(vertical = 1.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(if (selected) Cs.Input else Color.Transparent)
+                .border(1.dp, if (selected) Cs.Line else Color.Transparent, rowShape)
+                .clip(rowShape)
+                .background(
+                    if (selected) {
+                        Brush.verticalGradient(
+                            listOf(Color(0xFF26262F), Color(0xFF1B1B22)),
+                        )
+                    } else {
+                        SolidColor(Color.Transparent)
+                    },
+                )
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = { menu = true },
                 )
-                .padding(horizontal = 10.dp, vertical = 10.dp),
+                .padding(horizontal = 11.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
