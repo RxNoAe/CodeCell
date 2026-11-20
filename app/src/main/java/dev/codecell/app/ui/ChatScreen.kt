@@ -120,7 +120,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -268,13 +267,7 @@ fun CodeCellApp(state: AppState) {
                     Column(
                         Modifier
                             .fillMaxHeight()
-                            .background(
-                                Brush.verticalGradient(
-                                    0f to Color(0xFF191922),
-                                    0.16f to Color(0xFF121217),
-                                    1f to Color(0xFF0C0C10),
-                                ),
-                            ),
+                            .background(Cs.Sheet),
                     ) {
                         DrawerContent(
                         state = state,
@@ -313,7 +306,7 @@ fun CodeCellApp(state: AppState) {
         ) {
             Surface(
                 color = Color.Transparent,
-                modifier = Modifier.fillMaxSize().background(Cs.PageGradient),
+                modifier = Modifier.fillMaxSize().background(Cs.PageSurface),
             ) {
                 Column(
                     Modifier
@@ -624,7 +617,7 @@ private fun AgentChip(label: String, onClick: () -> Unit, modifier: Modifier = M
             .widthIn(max = 190.dp)
             .clip(shape)
             .background(
-                Brush.verticalGradient(listOf(Color(0xFF1F1F26), Color(0xFF15151A))),
+                Cs.Input,
             )
             .border(1.dp, Cs.Line, shape)
             .clickable(onClick = onClick)
@@ -702,7 +695,7 @@ private fun DrawerContent(
                     Modifier
                         .size(38.dp)
                         .clip(RoundedCornerShape(13.dp))
-                        .background(Brush.verticalGradient(listOf(Color(0xFF23232B), Color(0xFF16161B))))
+                        .background(Cs.Input)
                         .border(1.dp, Cs.Line, RoundedCornerShape(13.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -736,7 +729,7 @@ private fun DrawerContent(
                 .fillMaxWidth()
                 .shadow(16.dp, RoundedCornerShape(15.dp), ambientColor = Color.Black, spotColor = Color.Black)
                 .clip(RoundedCornerShape(15.dp))
-                .background(Cs.ButtonGradient)
+                .background(Cs.ButtonSurface)
                 .clickable(onClick = onNewChat)
                 .padding(horizontal = 14.dp, vertical = 13.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -759,7 +752,7 @@ private fun DrawerContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = if (showArchived) "ARCHIVED" else "RECENT",
+                text = if (showArchived) "Archived" else "Recent",
                 style = MaterialTheme.typography.labelSmall,
                 color = Cs.Dim,
             )
@@ -896,17 +889,8 @@ private fun SessionRow(
             Modifier
                 .fillMaxWidth()
                 .padding(vertical = 1.dp)
-                .border(1.dp, if (selected) Cs.Line else Color.Transparent, rowShape)
                 .clip(rowShape)
-                .background(
-                    if (selected) {
-                        Brush.verticalGradient(
-                            listOf(Color(0xFF26262F), Color(0xFF1B1B22)),
-                        )
-                    } else {
-                        SolidColor(Color.Transparent)
-                    },
-                )
+                .background(if (selected) Cs.Input else Color.Transparent)
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = { menu = true },
@@ -1062,23 +1046,7 @@ private fun EmptyState(
     status: String,
     onRetry: () -> Unit,
 ) {
-    val glow = rememberInfiniteTransition(label = "emptyGlow")
-    val glowAlpha by glow.animateFloat(
-        initialValue = 0.5f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(2400), RepeatMode.Reverse),
-        label = "glowAlpha",
-    )
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Box(
-            Modifier
-                .size(300.dp)
-                .graphicsLayer { alpha = glowAlpha }
-                .background(
-                    Brush.radialGradient(listOf(Cs.Glow, Color.Transparent)),
-                    CircleShape,
-                ),
-        )
         Column(
             Modifier.padding(bottom = 36.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -1089,7 +1057,7 @@ private fun EmptyState(
                     .shadow(24.dp, RoundedCornerShape(24.dp), ambientColor = Color.Black, spotColor = Color.Black)
                     .clip(RoundedCornerShape(24.dp))
                     .background(
-                        Brush.verticalGradient(listOf(Color(0xFF202027), Color(0xFF141419))),
+                        Cs.SheetTop,
                     )
                     .border(1.dp, Cs.Line, RoundedCornerShape(24.dp)),
                 contentAlignment = Alignment.Center,
@@ -1291,7 +1259,7 @@ private fun MessageRow(
                         modifier = Modifier
                             .widthIn(max = 304.dp)
                             .clip(shape)
-                            .background(Cs.BubbleGradient)
+                            .background(Cs.BubbleSurface)
                             .border(1.dp, Color(0xFF3A3A44), shape)
                             .padding(horizontal = 15.dp, vertical = 11.dp),
                     )
@@ -1887,7 +1855,7 @@ private fun ReasoningCard(text: String) {
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                text = "THINKING",
+                text = "Thinking",
                 color = Cs.Reasoning,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -2029,7 +1997,7 @@ private fun QuestionToolCard(part: ChatPart) {
             )
             Spacer(Modifier.width(7.dp))
             Text(
-                text = "QUESTION",
+                text = "Question",
                 color = accent,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.weight(1f),
@@ -2157,7 +2125,7 @@ private fun LiveCodeSection(part: ChatPart, accent: Color) {
             }
             Text(
                 text = if (running) {
-                    if (lines > 0) "writing · $lines lines" else "starting"
+                    if (lines > 0) "writing, $lines lines" else "starting"
                 } else {
                     if (lines == 1) "1 line" else "$lines lines"
                 },
@@ -2221,7 +2189,7 @@ private fun LiveOutputSection(part: ChatPart, accent: Color) {
             }
             Text(
                 text = if (running) {
-                    if (lines > 0) "streaming · $lines lines" else "starting"
+                    if (lines > 0) "streaming, $lines lines" else "starting"
                 } else {
                     if (lines == 1) "1 line" else "$lines lines"
                 },
@@ -2416,7 +2384,7 @@ private fun PatchCard(files: List<String>) {
             )
             Spacer(Modifier.width(7.dp))
             Text(
-                text = "FILES CHANGED",
+                text = "Files changed",
                 color = Cs.ToolCode,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -2623,7 +2591,7 @@ private fun FilePartCard(name: String, mime: String) {
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                text = "ATTACHED FILE",
+                text = "Attached file",
                 color = Cs.ToolNet,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -2665,7 +2633,7 @@ private fun SubtaskCard(part: ChatPart) {
             )
             Spacer(Modifier.width(7.dp))
             Text(
-                text = "SUBAGENT",
+                text = "Subagent",
                 color = Cs.ToolAgent,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -2711,7 +2679,7 @@ private fun AgentChip(name: String) {
         )
         Spacer(Modifier.width(6.dp))
         Text(
-            text = "AGENT · $name",
+            text = "agent, $name",
             color = Cs.ToolAgent,
             style = MaterialTheme.typography.labelSmall,
         )
@@ -2822,7 +2790,7 @@ private fun Composer(
                 .fillMaxWidth()
                 .shadow(28.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
                 .clip(shape)
-                .background(Cs.ComposerGradient)
+                .background(Cs.ComposerSurface)
                 .border(1.dp, Cs.Line, shape)
                 .padding(start = 4.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -2873,7 +2841,7 @@ private fun Composer(
                             spotColor = Color.White.copy(alpha = 0.16f),
                         )
                         .clip(CircleShape)
-                        .background(Cs.ButtonGradient)
+                        .background(Cs.ButtonSurface)
                         .border(1.dp, Color.Transparent, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -2907,13 +2875,9 @@ private fun Composer(
                     .clip(CircleShape)
                     .background(
                         brush = when {
-                            sending -> Brush.verticalGradient(
-                                listOf(Color(0xFF3A3A44), Color(0xFF2A2A31)),
-                            )
-                            canSend -> Cs.ButtonGradient
-                            else -> Brush.verticalGradient(
-                                listOf(Color(0xFF2A2A31), Color(0xFF232329)),
-                            )
+                            sending -> SolidColor(Cs.BubbleTop)
+                            canSend -> Cs.ButtonSurface
+                            else -> SolidColor(Cs.InputTop)
                         },
                     )
                     .border(1.dp, if (active) Color.Transparent else Cs.Line, CircleShape),

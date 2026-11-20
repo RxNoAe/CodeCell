@@ -219,7 +219,6 @@ fun SettingsSheet(
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         dragHandle = { SheetHandle() },
     ) {
-        val cardBrush = Brush.verticalGradient(listOf(Color(0xFF17171D), Color(0xFF121217)))
         Column(
             Modifier
                 .fillMaxWidth()
@@ -238,12 +237,12 @@ fun SettingsSheet(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            SettingsSectionHeader("ACCOUNT", Icons.Filled.Person)
+            SettingsSectionHeader("Account", Icons.Filled.Person)
             Column(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(cardBrush)
+                    .background(Cs.Input)
                     .border(1.dp, Cs.LineSoft, RoundedCornerShape(16.dp))
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -348,13 +347,13 @@ fun SettingsSheet(
                 }
             }
 
-            SettingsSectionHeader("PROVIDERS", Icons.Filled.Key)
+            SettingsSectionHeader("Providers", Icons.Filled.Key)
             val cardShape = RoundedCornerShape(16.dp)
             Row(
                 Modifier
                     .fillMaxWidth()
                     .clip(cardShape)
-                    .background(cardBrush)
+                    .background(Cs.Input)
                     .border(1.dp, Cs.LineSoft, cardShape)
                     .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -373,12 +372,12 @@ fun SettingsSheet(
                 }
             }
 
-            SettingsSectionHeader("EMBEDDED SERVER", Icons.Filled.Storage)
+            SettingsSectionHeader("Embedded server", Icons.Filled.Storage)
             Column(
                 Modifier
                     .fillMaxWidth()
                     .clip(cardShape)
-                    .background(cardBrush)
+                    .background(Cs.Input)
                     .border(1.dp, Cs.LineSoft, cardShape)
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -475,12 +474,12 @@ fun SettingsSheet(
                     }
                 }
             }
-            SettingsSectionHeader("LINUX ENVIRONMENT", Icons.Filled.Terminal)
+            SettingsSectionHeader("Linux environment", Icons.Filled.Terminal)
             Column(
                 Modifier
                     .fillMaxWidth()
                     .clip(cardShape)
-                    .background(cardBrush)
+                    .background(Cs.Input)
                     .border(1.dp, Cs.LineSoft, cardShape)
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -662,7 +661,7 @@ private fun AgentRow(agent: AgentOption, selected: Boolean, onClick: () -> Unit)
                 if (agent.isCustom) {
                     Spacer(Modifier.size(8.dp))
                     Text(
-                        text = "CUSTOM",
+                        text = "Custom",
                         color = Cs.Dim,
                         style = MaterialTheme.typography.labelSmall,
                     )
@@ -1235,7 +1234,7 @@ private fun ModelRow(
         }
         if (free) {
             Text(
-                text = "FREE",
+                text = "Free",
                 color = Cs.Success,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier

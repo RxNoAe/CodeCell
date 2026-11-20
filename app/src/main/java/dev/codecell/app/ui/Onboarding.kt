@@ -115,7 +115,7 @@ fun OnboardingScreen(state: AppState, scope: CoroutineScope) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Cs.PageGradient),
+                    .background(Cs.PageSurface),
             ) {
                 Column(
                     Modifier
@@ -287,7 +287,7 @@ private fun WelcomeLogin(
     Column(
         Modifier
             .fillMaxSize()
-            .background(Cs.PageGradient)
+            .background(Cs.PageSurface)
             .statusBarsPadding()
             .navigationBarsPadding()
             .padding(horizontal = 24.dp, vertical = 22.dp),
@@ -313,9 +313,7 @@ private fun WelcomeLogin(
                 Modifier
                     .size(116.dp)
                     .clip(RoundedCornerShape(32.dp))
-                    .background(
-                        Brush.verticalGradient(listOf(Color(0xFF202027), Color(0xFF111115))),
-                    )
+                    .background(Cs.SheetTop)
                     .border(1.dp, Cs.Line, RoundedCornerShape(32.dp)),
                 contentAlignment = Alignment.Center,
             ) {
@@ -1166,7 +1164,7 @@ private fun LinuxSetup(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "$stage · ${(progress * 100).toInt()}%",
+                        text = "$stage, ${(progress * 100).toInt()}%",
                         color = Cs.Muted,
                         style = MaterialTheme.typography.bodySmall,
                     )

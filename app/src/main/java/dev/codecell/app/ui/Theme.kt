@@ -8,6 +8,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -41,11 +42,10 @@ object Cs {
     val ToolNet = Color(0xFF7DD3FC)
     val ToolAgent = Color(0xFFC4A7FF)
 
-    val PageGradient = Brush.verticalGradient(listOf(Color(0xFF0E0E13), Bg))
-    val ComposerGradient = Brush.verticalGradient(listOf(Color(0xFF1D1D24), Color(0xFF16161B)))
-    val BubbleGradient = Brush.linearGradient(listOf(Color(0xFF303038), Color(0xFF26262D)))
-    val ButtonGradient = Brush.verticalGradient(listOf(Color(0xFFF7F7F9), Color(0xFFE6E6EB)))
-    val Glow = Color(0x14A9B0FF)
+    val PageSurface = SolidColor(Bg)
+    val ComposerSurface = SolidColor(Input)
+    val BubbleSurface = SolidColor(Bubble)
+    val ButtonSurface = SolidColor(Color(0xFFEFEFF3))
 }
 
 val Inter = FontFamily(
@@ -134,7 +134,7 @@ private val AppTypography = Typography(
         fontWeight = FontWeight.Medium,
         fontSize = 10.sp,
         lineHeight = 14.sp,
-        letterSpacing = 1.3.sp,
+        letterSpacing = 0.2.sp,
     ),
 )
 
